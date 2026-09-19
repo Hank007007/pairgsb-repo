@@ -16,6 +16,25 @@ def _text(value: Any) -> str | None:
     return str(value)
 
 
+# 仅当 key 当前值等于 ARGV[1] 时重置过期时间；比较和写由 Redis 单线程原子完成
+_EXPIRE_IF_VALUE_LUA = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('pexpire', KEYS[1], ARGV[2])
+else
+    return 0
+end
+"""
+
+# 仅当 key 当前值等于 ARGV[1] 时删除；同上保证原子性
+_DELETE_IF_VALUE_LUA = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+else
+    return 0
+end
+"""
+
+
 class RedisBackend:
     """把 redis.asyncio 客户端包成 LeaseManager 需要的 Backend 协议。
 
@@ -45,6 +64,16 @@ class RedisBackend:
 
     async def expire(self, key: str, ttl_ms: int) -> None:
         await self._client.pexpire(key, ttl_ms)
+
+    async def set_if_absent(self, key: str, value: str, ttl_ms: int) -> bool:
+        # SET key value PX ttl NX：检查与写入是一条命令，天然原子
+        return bool(await self._client.set(key, value, px=ttl_ms, nx=True))
+
+    async def expire_if_value(self, key: str, value: str, ttl_ms: int) -> bool:
+        return bool(await self._client.eval(_EXPIRE_IF_VALUE_LUA, 1, key, value, ttl_ms))
+
+    async def delete_if_value(self, key: str, value: str) -> bool:
+        return bool(await self._client.eval(_DELETE_IF_VALUE_LUA, 1, key, value))
 
     async def close(self) -> None:
         if self._owns_client:

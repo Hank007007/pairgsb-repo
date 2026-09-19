@@ -12,6 +12,14 @@
 
 - `LeaseManager.close()` 现在会把底层后端连接一并释放。
 
+### 修复
+
+- 并发抢占同一资源时可能出现两个客户端同时持有租约：`acquire` / `renew` /
+  `release` 改为通过 `Backend` 新增的原子原语（`set_if_absent` /
+  `expire_if_value` / `delete_if_value`）完成「检查 + 写入」，`RedisBackend`
+  分别用 `SET ... NX PX` 和 Lua 脚本实现；未实现新方法的旧后端自动退化为
+  原来的非原子路径，行为不变。
+
 ## [0.3.0] - 2026-08-02
 
 ### 新增

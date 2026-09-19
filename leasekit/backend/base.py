@@ -28,6 +28,31 @@ class Backend(Protocol):
         """把 key 的过期时间重置为 ttl_ms。key 不存在时什么都不做。"""
         ...
 
+    async def set_if_absent(self, key: str, value: str, ttl_ms: int) -> bool:
+        """仅当 key 不存在时写入并设置毫秒级过期时间，返回是否写入成功。
+
+        整个「检查 + 写入」必须是一次原子操作。这是 acquire 正确性的关键；
+        LeaseManager 会优先使用它，后端未实现时退化为 get + set（非原子，
+        仅为兼容旧后端）。
+        """
+        ...
+
+    async def expire_if_value(self, key: str, value: str, ttl_ms: int) -> bool:
+        """仅当 key 当前值等于 value 时，把过期时间重置为 ttl_ms。
+
+        「比较 + 重置」必须原子完成；返回是否生效。后端未实现时
+        LeaseManager 退化为 get + expire（非原子，仅为兼容旧后端）。
+        """
+        ...
+
+    async def delete_if_value(self, key: str, value: str) -> bool:
+        """仅当 key 当前值等于 value 时删除它，返回是否删除成功。
+
+        「比较 + 删除」必须原子完成。后端未实现时 LeaseManager 退化为
+        get + delete（非原子，仅为兼容旧后端）。
+        """
+        ...
+
     async def close(self) -> None:
         """释放底层连接。"""
         ...

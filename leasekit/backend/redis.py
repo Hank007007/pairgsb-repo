@@ -6,6 +6,25 @@ from typing import Any
 
 import redis.asyncio as aioredis
 
+# 「比较持有者 + 写 TTL」与「比较持有者 + 删除」各自必须是原子操作，
+# 否则 GET 与写命令之间的窗口里租约可能易主，导致两个客户端同时
+# 认为自己持有同一资源。
+_EXPIRE_IF_OWNER = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("pexpire", KEYS[1], ARGV[2])
+else
+    return 0
+end
+"""
+
+_DELETE_IF_OWNER = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end
+"""
+
 
 def _text(value: Any) -> str | None:
     """把 redis 返回值统一成 str。"""
@@ -45,6 +64,17 @@ class RedisBackend:
 
     async def expire(self, key: str, ttl_ms: int) -> None:
         await self._client.pexpire(key, ttl_ms)
+
+    async def set_if_absent(self, key: str, value: str, ttl_ms: int) -> bool:
+        return bool(await self._client.set(key, value, nx=True, px=ttl_ms))
+
+    async def expire_if_owner(self, key: str, holder: str, ttl_ms: int) -> bool:
+        return bool(
+            await self._client.eval(_EXPIRE_IF_OWNER, 1, key, holder, ttl_ms)
+        )
+
+    async def delete_if_owner(self, key: str, holder: str) -> bool:
+        return bool(await self._client.eval(_DELETE_IF_OWNER, 1, key, holder))
 
     async def close(self) -> None:
         if self._owns_client:

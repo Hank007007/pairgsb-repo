@@ -12,6 +12,10 @@
 
 - `LeaseManager.close()` 现在会把底层后端连接一并释放。
 
+### 修复
+
+- 修复并发 `acquire` 同一资源时两个客户端可能同时抢占成功的问题：`acquire` / `renew` / `release` 原先的「先查后写」不是原子操作，现改为通过后端的原子比较并写入（`set_if_absent` / `expire_if_owner` / `delete_if_owner`）完成；未实现这些可选方法的旧后端仍可继续使用。
+
 ## [0.3.0] - 2026-08-02
 
 ### 新增

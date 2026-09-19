@@ -94,6 +94,14 @@ class LeaseManager:
         """带超时地等待一次后端调用。"""
         return await asyncio.wait_for(coro, timeout=self._timeout_s)
 
+    def _supports(self, name: str) -> bool:
+        """后端是否提供某个可选的原子方法。
+
+        这些方法在 Backend 协议上是可选的；未实现它们的旧后端
+        （或第三方后端）仍可使用，但会退回到非原子的组合操作。
+        """
+        return callable(getattr(self._backend, name, None))
+
     # ------------------------------------------------------------------
     # 公开 API
     # ------------------------------------------------------------------
@@ -109,9 +117,20 @@ class LeaseManager:
         holder = owner or _default_owner()
         key = self._key(resource)
 
-        current = await self._call(self._backend.get(key))
-        if current is not None:
-            raise LeaseNotHeld(resource, holder=current)
+        if self._supports("set_if_absent"):
+            acquired = await self._call(
+                self._backend.set_if_absent(key, holder, ttl)
+            )
+            if not acquired:
+                raise LeaseNotHeld(
+                    resource, holder=await self.owner_of(resource)
+                )
+        else:
+            # 旧后端：get + set 不是原子的，并发下可能双双抢占成功
+            current = await self._call(self._backend.get(key))
+            if current is not None:
+                raise LeaseNotHeld(resource, holder=current)
+            await self._call(self._backend.set(key, holder, ttl))
 
         lease = Lease(
             lease_id=f"{resource}@{holder}",
@@ -120,7 +139,6 @@ class LeaseManager:
             acquired_at=time.monotonic(),
             ttl_ms=ttl,
         )
-        await self._call(self._backend.set(key, holder, ttl))
         self._leases[resource] = lease
         return lease
 
@@ -131,12 +149,21 @@ class LeaseManager:
         key = self._key(resource)
         holder = self._stored_owner(resource)
 
-        current = await self._call(self._backend.get(key))
-        if current != holder:
-            self._leases.pop(resource, None)
-            raise LeaseExpired(resource)
+        if self._supports("expire_if_owner"):
+            renewed_ok = await self._call(
+                self._backend.expire_if_owner(key, holder, ttl)
+            )
+            if not renewed_ok:
+                self._leases.pop(resource, None)
+                raise LeaseExpired(resource)
+        else:
+            # 旧后端：get 与 expire 之间可能被他人接管，非原子
+            current = await self._call(self._backend.get(key))
+            if current != holder:
+                self._leases.pop(resource, None)
+                raise LeaseExpired(resource)
+            await self._call(self._backend.expire(key, ttl))
 
-        await self._call(self._backend.expire(key, ttl))
         old = self._leases[resource]
         renewed = Lease(
             lease_id=old.lease_id,
@@ -154,12 +181,23 @@ class LeaseManager:
         key = self._key(resource)
         holder = self._stored_owner(resource)
 
-        current = await self._call(self._backend.get(key))
-        if current != holder:
-            self._leases.pop(resource, None)
-            raise LeaseNotHeld(resource, holder=current or "")
+        if self._supports("delete_if_owner"):
+            deleted = await self._call(
+                self._backend.delete_if_owner(key, holder)
+            )
+            if not deleted:
+                self._leases.pop(resource, None)
+                raise LeaseNotHeld(
+                    resource, holder=await self.owner_of(resource)
+                )
+        else:
+            # 旧后端：get 与 delete 之间可能被他人接管，非原子
+            current = await self._call(self._backend.get(key))
+            if current != holder:
+                self._leases.pop(resource, None)
+                raise LeaseNotHeld(resource, holder=current or "")
+            await self._call(self._backend.delete(key))
 
-        await self._call(self._backend.delete(key))
         self._leases.pop(resource, None)
 
     async def owner_of(self, resource: str) -> str:

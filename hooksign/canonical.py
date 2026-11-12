@@ -22,7 +22,6 @@ def canonical_string(*, method: str, path: str, timestamp: int, digest: str) -> 
             VERSION,
             method.upper(),
             path,
-            "",
             str(timestamp),
             digest,
         ]

@@ -35,16 +35,13 @@ class ReplayCache:
     def check_and_store(self, key: str, *, now: float | None = None) -> bool:
         """第一次见到 ``key`` 返回 ``True`` 并记下；已经见过返回 ``False``。"""
         moment = self._clock() if now is None else float(now)
-        self._sweep(moment)
-
         with self._lock:
+            self._sweep(moment)
             if key in self._entries:
                 return False
-
-        with self._lock:
             self._entries[key] = moment + self._ttl_s
             self._enforce_limit()
-        return True
+            return True
 
     def __len__(self) -> int:
         with self._lock:
@@ -58,10 +55,10 @@ class ReplayCache:
     # 内部
     # ------------------------------------------------------------------
     def _sweep(self, now: float) -> None:
-        with self._lock:
-            expired = [key for key, expiry in self._entries.items() if expiry <= now]
-            for key in expired:
-                del self._entries[key]
+        """剔除过期条目。调用方必须已经持有锁。"""
+        expired = [key for key, expiry in self._entries.items() if expiry <= now]
+        for key in expired:
+            del self._entries[key]
 
     def _enforce_limit(self) -> None:
         """超出上限时按过期时间剔除最早的条目。调用方必须已经持有锁。"""

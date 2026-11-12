@@ -30,6 +30,15 @@ def build_verifier(secret_text: str, db_path: str) -> WebhookVerifier:
     )
 
 
+# 规范第 7 节的原因码 -> HTTP 状态码映射。
+REASON_HTTP = {
+    "missing_header": 401,
+    "malformed_header": 400,
+    "timestamp_skew": 401,
+    "bad_signature": 401,
+}
+
+
 class Handler(BaseHTTPRequestHandler):
     verifier: WebhookVerifier
     store: DeliveryStore
@@ -45,7 +54,12 @@ class Handler(BaseHTTPRequestHandler):
         )
         result = self.verifier.verify(request)
         if not result.ok:
-            self._reply(401, {"ok": False, "reason": result.reason})
+            if result.reason == "replay":
+                # 窗口内重复投递：幂等命中，按成功处理但不再执行业务。
+                self._reply(200, {"ok": True, "reason": "replay", "duplicate": True})
+            else:
+                code = REASON_HTTP.get(result.reason, 401)
+                self._reply(code, {"ok": False, "reason": result.reason})
             return
 
         try:

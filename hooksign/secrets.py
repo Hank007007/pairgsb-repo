@@ -57,11 +57,12 @@ class SecretRing:
         return alive
 
     def primary(self) -> Secret:
-        """最新的一把，用于签名出方向请求。"""
-        alive = self.active()
-        if not alive:
-            raise ConfigurationError("密钥环里没有可用的 secret")
-        return alive[0]
+        """最后添加且未过期的那把，用于签名出方向请求。"""
+        current = time.time()
+        for secret in reversed(self._secrets):
+            if secret.not_after is None or secret.not_after > current:
+                return secret
+        raise ConfigurationError("密钥环里没有可用的 secret")
 
     def __len__(self) -> int:
         return len(self._secrets)

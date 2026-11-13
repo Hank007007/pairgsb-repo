@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+out/
+*.mp4
+*.m4s
+*.m3u8
+demo-out/

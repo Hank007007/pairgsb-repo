@@ -1,6 +1,6 @@
 """媒体段（moof + mdat）。
 
-一个媒体段的结构（见 ``docs/packaging-spec.md`` §5）：
+一个媒体段的结构（见 ``docs/packaging-spec.md`` §3）：
 
     moof
       mfhd   段序号 1..N 递增（对应播放列表里的顺序，不是文件序号）
@@ -46,10 +46,8 @@ def tfdt(base_decode_time: int) -> bytes:
 
 def trun(samples: tuple[Sample, ...] | list[Sample], data_offset: int) -> bytes:
     body = u32(len(samples)) + u32(data_offset & 0xFFFFFFFF)
-    # 段内帧率一致，样本时长按首样本写一份即可。
-    duration = samples[0].duration
     for sample in samples:
-        body += u32(duration, sample.size)
+        body += u32(sample.duration, sample.size)
     return full_box(b"trun", 0, TRUN_FLAGS, body)
 
 

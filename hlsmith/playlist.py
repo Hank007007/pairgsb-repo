@@ -27,17 +27,19 @@ def build_playlist(
 ) -> str:
     """生成 VOD 媒体播放列表。
 
-    ``target_seconds`` 是切段时的目标段长（配置值），``init_name`` 是初始化段文件名。
+    ``target_seconds`` 保留以兼容既有调用；``TARGETDURATION`` 由实际段长决定。
+    ``init_name`` 是初始化段文件名。
     """
     if not segments:
         raise ValueError("至少需要一个段才能生成播放列表")
 
-    # 播放器会拿 TARGETDURATION 估算缓冲，报配置里的目标段长就够用了。
-    target = math.ceil(target_seconds)
+    # TARGETDURATION 必须不小于任何一个 EXTINF，因此按产物里的实际最大段长取整。
+    target = math.ceil(max(extinf_seconds(segment, timescale) for segment in segments))
 
     lines = [
         "#EXTM3U",
         f"#EXT-X-VERSION:{PLAYLIST_VERSION}",
+        "#EXT-X-PLAYLIST-TYPE:VOD",
         f"#EXT-X-TARGETDURATION:{target}",
         "#EXT-X-MEDIA-SEQUENCE:0",
         f'#EXT-X-MAP:URI="{init_name}"',
@@ -45,4 +47,5 @@ def build_playlist(
     for segment in segments:
         lines.append(f"#EXTINF:{extinf_seconds(segment, timescale):.6f},")
         lines.append(segment_pattern.format(index=segment.index + 1))
+    lines.append("#EXT-X-ENDLIST")
     return "\n".join(lines) + "\n"

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- 修复媒体段 `tfdt` 被错误归零的问题，保留源时间线的绝对 `dts`（HLS-231）。
+- 修复媒体段落盘文件名与播放列表编号整体错一位的问题（HLS-232）。
+- 修复 `EXT-X-TARGETDURATION` 未按实际最大 `EXTINF` 向上取整的问题（HLS-233）。
+- 修复 init 中 `mvhd` / `mdhd` / `tkhd` 时长被错误换算成毫秒的问题（HLS-234）。
+- 修复 `trun` 用首样本时长覆盖整段、变帧率素材时长漂移的问题（HLS-235）。
+- 修复尾段短于半个目标段长时未并入前一段的问题（HLS-236）。
+- 补齐点播播放列表的 `EXT-X-PLAYLIST-TYPE:VOD` 与 `EXT-X-ENDLIST`（HLS-237）。
+- 修复切点可能落在非 sync 样本上的问题（HLS-238）。
 - 支持 `--report` 只打印切段表，不落盘。
 - `examples/dump.py`：盒子转储小工具，排查打包产物用。
 

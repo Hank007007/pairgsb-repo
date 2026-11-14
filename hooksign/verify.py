@@ -35,7 +35,7 @@ class VerificationResult:
     - ``malformed_header``   头式不对，或没有可用的 ``v1``
     - ``timestamp_skew``     时间戳超出容差
     - ``bad_signature``      签名不匹配
-    - ``replay``             时间窗内重复投递
+    - ``replay``             时间窗内重复投递（幂等命中，此时 ``ok`` 为 ``True``）
     """
 
     ok: bool
@@ -68,9 +68,11 @@ class WebhookVerifier:
         self._clock = clock
 
     def verify(self, request: SignedRequest) -> VerificationResult:
-        raw = request.headers.get(HEADER_NAME) or request.headers.get(
-            HEADER_NAME.lower()
-        )
+        raw = None
+        for name, value in request.headers.items():
+            if name.lower() == HEADER_NAME.lower():
+                raw = value
+                break
         if not raw:
             return VerificationResult(ok=False, reason="missing_header")
 
@@ -89,25 +91,26 @@ class WebhookVerifier:
                 ok=False, reason="timestamp_skew", timestamp=timestamp
             )
 
-        # 服务端拿到的是解码后的正文，签名按文本重新算一遍
-        body_text = request.body.decode("utf-8", errors="replace")
-        digest = body_digest(body_text.encode("utf-8"))
+        # 规范要求对原始请求体字节算摘要，不做任何解码或转码
+        digest = body_digest(request.body)
 
-        secret = self._secrets.primary()
         message = canonical_string(
             method=request.method,
             path=request.path,
             timestamp=timestamp,
             digest=digest,
-        )
-        expected = hmac.new(
-            secret.key, message.encode("utf-8"), hashlib.sha256
-        ).hexdigest()
+        ).encode("utf-8")
 
         matched = None
-        for candidate in parsed.signatures:
-            if expected == candidate:
-                matched = secret
+        matched_signature = None
+        for secret in self._secrets.active(now=now):
+            expected = hmac.new(secret.key, message, hashlib.sha256).hexdigest()
+            for candidate in parsed.signatures:
+                if hmac.compare_digest(expected, candidate):
+                    matched = secret
+                    matched_signature = candidate
+                    break
+            if matched is not None:
                 break
 
         if matched is None:
@@ -116,9 +119,10 @@ class WebhookVerifier:
             )
 
         if self._replay_cache is not None:
-            if not self._replay_cache.check_and_store(str(timestamp), now=now):
+            replay_key = f"{timestamp}:{matched_signature}"
+            if not self._replay_cache.check_and_store(replay_key, now=now):
                 return VerificationResult(
-                    ok=False,
+                    ok=True,
                     reason="replay",
                     secret_id=matched.id,
                     timestamp=timestamp,

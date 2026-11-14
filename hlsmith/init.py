@@ -1,6 +1,6 @@
 """初始化段（ftyp + moov）。
 
-结构见 ``docs/segmenting-rules.md`` §4。样本表（stbl）全部留空，样本信息由每个
+结构见 ``docs/packaging-spec.md`` §4。样本表（stbl）全部留空，样本信息由每个
 媒体段的 moof 承载 —— 这是 fMP4 与普通 MP4 的关键区别。
 """
 
@@ -144,7 +144,4 @@ def build_init(timescale: int, duration_ticks: int) -> bytes:
         raise ValueError("timescale 必须为正")
     if duration_ticks < 0:
         raise ValueError("duration_ticks 不能为负")
-    # 各播放器展示时长时都按毫秒理解，这里统一换算成毫秒再写，避免某些播放器
-    # 直接拿 duration/timescale 显示出离谱的小时数。
-    duration = int(round(duration_ticks * 1000 / timescale))
-    return ftyp() + moov(timescale, duration)
+    return ftyp() + moov(timescale, duration_ticks)

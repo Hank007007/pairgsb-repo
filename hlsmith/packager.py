@@ -37,25 +37,25 @@ def package(
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    ts = timescale or source.timescale
+    ts = source.timescale
+    if timescale is not None and timescale != ts:
+        raise ValueError("timescale 必须与源文件一致（规范 §1.1）")
     segments = segment(source, target_seconds)
 
     init_bytes = init_mod.build_init(ts, source.duration_ticks)
     init_path = out / INIT_NAME
     init_path.write_bytes(init_bytes)
 
-    first_dts = source.samples[0].dts
     segment_paths: list[Path] = []
     for chunk in segments:
-        # 媒体段时间线从 0 开始，播放器按段内时间累加即可。
-        base = chunk.start_dts - first_dts
+        # 保留源时间线的绝对值：tfdt 取该段首样本在源里的 dts（规范 §1.2）。
         payload = media.build_segment(
             chunk.samples,
             timescale=ts,
-            base_decode_time=base,
+            base_decode_time=chunk.start_dts,
             sequence_number=chunk.index + 1,
         )
-        path = out / SEGMENT_PATTERN.format(index=chunk.index)
+        path = out / SEGMENT_PATTERN.format(index=chunk.index + 1)
         path.write_bytes(payload)
         segment_paths.append(path)
 

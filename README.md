@@ -21,7 +21,7 @@ python -m hlsmith.cli --make-source /tmp/gen.jsonl --seconds 30            # 生
 ```
 out/
   init.mp4        ftyp + moov
-  seg-00000.m4s   moof + mdat
+  seg-00001.m4s   moof + mdat
   ...
   index.m3u8
 ```

@@ -1,6 +1,6 @@
 """把连续样本流切成 HLS 媒体段。
 
-切段规则见 ``docs/segmenting-rules.md``（§1–§3）。本模块只决定"切在哪一个样本之前"，
+切段规则见 ``docs/packaging-spec.md`` §2。本模块只决定"切在哪一个样本之前"，
 不负责写文件；输出是一串 :class:`Segment`，供 writer 与 playlist 消费。
 """
 
@@ -58,16 +58,28 @@ def target_ticks(timescale: int, target_seconds: float) -> int:
 
 
 def cut_indexes(source: Source, target_seconds: float) -> list[int]:
-    """返回每个段的起始样本下标（第一个元素恒为 0）。"""
+    """返回每个段的起始样本下标（第一个元素恒为 0）。
+
+    切点只能落在 sync 样本上，且是"距当前段首至少目标 ticks"的第一个 sync。
+    最后一段短于半个目标段长时并入前一段（只有一段时保留）。
+    """
     limit = target_ticks(source.timescale, target_seconds)
     starts = [0]
     start = 0
     samples = source.samples
     for offset in range(1, len(samples)):
+        if not samples[offset].sync:
+            continue
         elapsed = samples[offset].dts - samples[start].dts
         if elapsed >= limit:
             starts.append(offset)
             start = offset
+
+    if len(starts) > 1:
+        tail = samples[starts[-1]:]
+        tail_ticks = tail[-1].dts + tail[-1].duration - tail[0].dts
+        if tail_ticks * 2 < limit:
+            starts.pop()
     return starts
 
 

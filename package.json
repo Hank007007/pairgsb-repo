@@ -1,0 +1,14 @@
+{
+  "name": "chainlog",
+  "version": "2.3.0",
+  "private": true,
+  "type": "module",
+  "description": "防篡改审计日志（分段哈希链）",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "verify": "node src/cli.js verify"
+  }
+}

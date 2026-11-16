@@ -1,0 +1,92 @@
+{
+  "version": "2026-10-01",
+  "rules": [
+    {
+      "name": "platform-admin",
+      "roles": ["platform-admin"],
+      "resource": "/**",
+      "actions": ["*"],
+      "effect": "allow"
+    },
+    {
+      "name": "org-profile-reader",
+      "roles": ["org-profile-reader"],
+      "resource": "/orgs/acme",
+      "actions": ["read"],
+      "effect": "allow"
+    },
+    {
+      "name": "org-reader-on-own-org",
+      "roles": ["org-reader", "platform-reader"],
+      "resource": "/orgs/acme/**",
+      "actions": ["read"],
+      "effect": "allow"
+    },
+    {
+      "name": "org-writer-on-own-org",
+      "roles": ["org-writer"],
+      "resource": "/orgs/acme/**",
+      "actions": ["write"],
+      "effect": "allow"
+    },
+    {
+      "name": "project-reader",
+      "roles": ["project-reader"],
+      "resource": "/orgs/*/projects/**",
+      "actions": ["read"],
+      "effect": "allow"
+    },
+    {
+      "name": "tenant-self-service",
+      "roles": ["tenant-self-service"],
+      "resource": "*",
+      "actions": ["*"],
+      "effect": "allow"
+    },
+    {
+      "name": "billing-frozen",
+      "roles": ["org-reader", "org-writer"],
+      "resource": "/orgs/acme/billing/**",
+      "actions": ["*"],
+      "effect": "deny"
+    }
+  ],
+  "delegations": [
+    {
+      "from": "org-reader",
+      "to": "auditor",
+      "resource": "/orgs/**",
+      "actions": ["read"]
+    },
+    {
+      "from": "auditor",
+      "to": "contractor-auditor",
+      "resource": "/orgs/acme/**",
+      "actions": ["read"]
+    },
+    {
+      "from": "contractor-auditor",
+      "to": "partner-auditor",
+      "resource": "/orgs/acme/**",
+      "actions": ["read"]
+    },
+    {
+      "from": "partner-auditor",
+      "to": "guest-auditor",
+      "resource": "/orgs/acme/**",
+      "actions": ["read"]
+    },
+    {
+      "from": "cycle-alpha",
+      "to": "cycle-beta",
+      "resource": "/orgs/acme/**",
+      "actions": ["read"]
+    },
+    {
+      "from": "cycle-beta",
+      "to": "cycle-alpha",
+      "resource": "/orgs/acme/**",
+      "actions": ["read"]
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+# Build output
+/bin/
+/dist/
+/scopewall
+/scopewall.exe
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.*
+
+# Go caches and module downloads
+.gocache/
+.gomodcache/
+vendor/
+
+# Local configuration and scratch files
+*.local.json
+*.local
+.env
+.env.*
+*.log
+.build.prompt.txt
+tmp/
+.tmp/
+
+# Editor and OS metadata
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- 修复审计链校验：记录 MAC 覆盖 `seq` / `segment` / `prevMac`，新增段摘要与段间链接校验；断链后继续校验剩余段，并让 `open()` 不再信任被篡改的 manifest。
+
 ## [2.3.0] - 2026-10-21
 
 ### Added

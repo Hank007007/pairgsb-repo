@@ -1,9 +1,10 @@
-import { mkdir, open, readFile, readdir, stat } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { getKey, recordMac } from './hmac.js';
+import { chainDigest, getKey, recordMac } from './hmac.js';
 
 export const MANIFEST = 'manifest.json';
+const ZERO_MAC = '0'.repeat(64);
 
 /**
  * 追加式审计日志。按 maxEntries 切段，每段一个 JSONL 文件。
@@ -15,7 +16,7 @@ export class Journal {
     this.key = key;
     this.segment = 0;
     this.seq = 0;
-    this.prevMac = '0'.repeat(64);
+    this.prevMac = ZERO_MAC;
     this.count = 0;
   }
 
@@ -33,18 +34,19 @@ export class Journal {
 
   async open() {
     await mkdir(this.dir, { recursive: true });
+    const recovered = await this.recoverState();
     let manifest = null;
     try {
       manifest = JSON.parse(await readFile(this.manifestPath(), 'utf8'));
     } catch {
       manifest = null;
     }
-    if (manifest) {
-      this.segment = manifest.segment;
-      this.seq = manifest.seq;
-      this.prevMac = manifest.prevMac;
-      this.count = manifest.count;
-    }
+    const state =
+      manifest && this.manifestMatches(manifest, recovered) ? manifest : recovered;
+    this.segment = state.segment;
+    this.seq = state.seq;
+    this.prevMac = state.prevMac;
+    this.count = state.count;
     return this;
   }
 
@@ -55,11 +57,16 @@ export class Journal {
     if (this.count >= this.maxEntries) {
       this.segment += 1;
       this.count = 0;
+    } else if (this.count > 0) {
+      await this.clearLastDigest(this.segment);
     }
 
     const seq = (this.seq += 1);
     const body = { ...record, seq, segment: this.segment };
-    const entry = { ...body, prevMac: this.prevMac, mac: recordMac(body, this.macKey()) };
+    const macBody = { ...body, prevMac: this.prevMac };
+    const mac = recordMac(macBody, this.macKey());
+    const segmentDigest = chainDigest(this.segment, this.count + 1, mac, this.macKey());
+    const entry = { ...macBody, segmentDigest, mac };
 
     const handle = await open(this.segmentPath(this.segment), 'a');
     try {
@@ -72,6 +79,52 @@ export class Journal {
     this.count += 1;
     await this.writeManifest();
     return entry;
+  }
+
+  async recoverState() {
+    const files = await listSegments(this.dir);
+    if (files.length === 0) {
+      return { segment: 0, seq: 0, prevMac: ZERO_MAC, count: 0 };
+    }
+
+    const lastFile = files[files.length - 1];
+    const lastSegment = segmentIndex(lastFile);
+    const lastEntries = await readSegment(lastFile);
+    let lastNonEmpty = lastEntries;
+    for (let i = files.length - 2; i >= 0 && lastNonEmpty.length === 0; i -= 1) {
+      lastNonEmpty = await readSegment(files[i]);
+    }
+    const lastEntry = lastNonEmpty[lastNonEmpty.length - 1];
+    return {
+      segment: lastSegment,
+      seq: lastEntry ? lastEntry.seq : 0,
+      prevMac: lastEntry ? lastEntry.mac : ZERO_MAC,
+      count: lastEntries.length,
+    };
+  }
+
+  manifestMatches(manifest, recovered) {
+    return (
+      manifest.segment === recovered.segment &&
+      manifest.seq === recovered.seq &&
+      manifest.prevMac === recovered.prevMac &&
+      manifest.count === recovered.count
+    );
+  }
+
+  async clearLastDigest(segment) {
+    const file = this.segmentPath(segment);
+    let entries;
+    try {
+      entries = await readSegment(file);
+    } catch {
+      return;
+    }
+    if (entries.length === 0) return;
+    const last = entries[entries.length - 1];
+    if (!('segmentDigest' in last)) return;
+    delete last.segmentDigest;
+    await writeFile(file, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
   }
 
   async lastMac(segment) {
@@ -134,4 +187,9 @@ export async function segmentExists(file) {
   } catch {
     return false;
   }
+}
+
+function segmentIndex(file) {
+  const match = /^segment-(\d{4})\.jsonl$/.exec(path.basename(file));
+  return match ? Number(match[1]) : -1;
 }

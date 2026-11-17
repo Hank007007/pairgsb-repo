@@ -16,6 +16,22 @@ export function recordMac(record, key = getKey()) {
   return createHmac('sha256', key).update(canonicalize(record), 'utf8').digest('hex');
 }
 
+export function chainDigest(segment, count, lastMac, key = getKey()) {
+  if (segment !== null && typeof segment === 'object') {
+    const parts = segment;
+    const mac = parts.lastMac ?? parts.mac;
+    return chainDigest(parts.segment, parts.count, mac, count ?? getKey());
+  }
+  let index = segment;
+  let mac = lastMac;
+  if (typeof segment === 'string' && typeof lastMac === 'number') {
+    mac = segment;
+    index = lastMac;
+  }
+  const payload = `${index}\n${count}\n${mac}`;
+  return createHmac('sha256', key).update(payload, 'utf8').digest('hex');
+}
+
 export function macEquals(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   const left = Buffer.from(a, 'hex');

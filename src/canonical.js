@@ -12,6 +12,7 @@ const FIELD_ORDER = [
   'meta',
   'seq',
   'segment',
+  'prevMac',
 ];
 
 export function canonicalize(record) {

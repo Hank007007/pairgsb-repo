@@ -1,0 +1,29 @@
+# Build output
+/bin/
+/dist/
+/sudopolicy
+/sudopolicy.exe
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go workspace and caches
+/vendor/
+go.work
+go.work.sum
+*.prof
+*.cover
+coverage.txt
+
+# Editor and OS cruft
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local scratch files
+.build.prompt.txt

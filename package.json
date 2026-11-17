@@ -1,0 +1,16 @@
+{
+  "name": "envwrap",
+  "version": "0.1.0",
+  "description": "Compact signed envelopes for carrying session state between stateless services",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "demo": "node scripts/demo.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Test and coverage output
+coverage/
+.nyc_output/
+junit.xml
+
+# Caches
+.cache/
+.npm/
+.eslintcache
+
+# Local configuration and secrets
+.env
+.env.*
+.build.prompt.txt
+
+# Logs and editor/OS noise
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

@@ -27,8 +27,8 @@ func Expand(doc *graphql.Document) (*ExpandedDocument, error) {
 	out := &ExpandedDocument{Operations: make([]*ExpandedOperation, 0, len(doc.Operations))}
 
 	for _, op := range doc.Operations {
-		visited := make(map[string]bool, len(doc.Fragments))
-		sel, err := expandSelections(doc, op.SelectionSet, visited)
+		stack := make(map[string]bool, len(doc.Fragments))
+		sel, err := expandSelections(doc, op.SelectionSet, stack)
 		if err != nil {
 			return nil, err
 		}
@@ -41,7 +41,12 @@ func Expand(doc *graphql.Document) (*ExpandedDocument, error) {
 	return out, nil
 }
 
-func expandSelections(doc *graphql.Document, sels []graphql.Selection, visited map[string]bool) ([]graphql.Selection, error) {
+// expandSelections resolves spreads recursively. stack holds the fragments
+// currently being expanded on this path, so a fragment that refers to itself
+// — directly or through other fragments — is reported as a cycle instead of
+// recursing forever. Every reference expands its own copy of the fragment
+// body; referencing a fragment twice yields two copies.
+func expandSelections(doc *graphql.Document, sels []graphql.Selection, stack map[string]bool) ([]graphql.Selection, error) {
 	if len(sels) == 0 {
 		return nil, nil
 	}
@@ -50,7 +55,7 @@ func expandSelections(doc *graphql.Document, sels []graphql.Selection, visited m
 	for _, sel := range sels {
 		switch s := sel.(type) {
 		case *graphql.Field:
-			sub, err := expandSelections(doc, s.SelectionSet, visited)
+			sub, err := expandSelections(doc, s.SelectionSet, stack)
 			if err != nil {
 				return nil, err
 			}
@@ -59,7 +64,7 @@ func expandSelections(doc *graphql.Document, sels []graphql.Selection, visited m
 			out = append(out, &clone)
 
 		case *graphql.InlineFragment:
-			sub, err := expandSelections(doc, s.SelectionSet, visited)
+			sub, err := expandSelections(doc, s.SelectionSet, stack)
 			if err != nil {
 				return nil, err
 			}
@@ -72,14 +77,15 @@ func expandSelections(doc *graphql.Document, sels []graphql.Selection, visited m
 			if !ok {
 				return nil, fmt.Errorf("unknown fragment %q", s.Name)
 			}
-			if visited[s.Name] {
-				continue
+			if stack[s.Name] {
+				return nil, fmt.Errorf("fragment %q contains a reference cycle", s.Name)
 			}
-			sub, err := expandSelections(doc, frag.SelectionSet, visited)
+			stack[s.Name] = true
+			sub, err := expandSelections(doc, frag.SelectionSet, stack)
+			delete(stack, s.Name)
 			if err != nil {
 				return nil, err
 			}
-			visited[s.Name] = true
 			out = append(out, sub...)
 
 		default:

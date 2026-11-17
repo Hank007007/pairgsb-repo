@@ -10,7 +10,7 @@ import (
 // Count returns the number of fields the operation selects. Every field node
 // counts once; a field reached through several aliases counts once per alias.
 func Count(op *parse.ExpandedOperation) int {
-	return countSelections(op.Operation.SelectionSet)
+	return countSelections(op.SelectionSet)
 }
 
 func countSelections(sels []graphql.Selection) int {
@@ -33,7 +33,7 @@ func countSelections(sels []graphql.Selection) int {
 // field has depth 1 and a field counts one level more than the deepest field
 // beneath it.
 func Depth(op *parse.ExpandedOperation) int {
-	return depthOf(op.Operation.SelectionSet)
+	return depthOf(op.SelectionSet)
 }
 
 func depthOf(sels []graphql.Selection) int {

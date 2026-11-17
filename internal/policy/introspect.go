@@ -2,6 +2,7 @@ package policy
 
 import (
 	"fmt"
+	"strings"
 
 	"gqladmit/internal/graphql"
 )
@@ -25,12 +26,10 @@ func (g *IntrospectionGuard) Check(sels []graphql.Selection) error {
 	for _, sel := range sels {
 		switch s := sel.(type) {
 		case *graphql.Field:
-			name := s.Name
-			if s.Alias != "" {
-				name = s.Alias
-			}
-			if name == "__schema" || name == "__type" {
-				return fmt.Errorf("field %q is not available", name)
+			// The decision is made on the real field name; an alias is
+			// only a response key and must not hide a meta field.
+			if strings.HasPrefix(s.Name, "__") && s.Name != "__typename" {
+				return fmt.Errorf("field %q is not available", s.Name)
 			}
 			if err := g.Check(s.SelectionSet); err != nil {
 				return err

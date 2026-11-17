@@ -40,12 +40,10 @@ func (a *Authorizer) Check(tenant string, sels []graphql.Selection) error {
 	for _, sel := range sels {
 		switch s := sel.(type) {
 		case *graphql.Field:
-			name := s.Name
-			if s.Alias != "" {
-				name = s.Alias
-			}
-			if !a.allowed(tenant, name) {
-				return fmt.Errorf("tenant %q may not read field %q", tenant, name)
+			// The decision is made on the real field name; an alias does
+			// not rename the schema field for authorisation purposes.
+			if !a.allowed(tenant, s.Name) {
+				return fmt.Errorf("tenant %q may not read field %q", tenant, s.Name)
 			}
 			if err := a.Check(tenant, s.SelectionSet); err != nil {
 				return err

@@ -1,0 +1,32 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test and coverage artifacts
+*.test
+*.out
+coverage.*
+coverage.html
+
+# Go workspace and tooling caches
+/vendor/
+go.work
+go.work.sum
+
+# Editor / OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local scratch files
+*.log
+*.tmp
+
+# Local task notes
+/.build.prompt.txt

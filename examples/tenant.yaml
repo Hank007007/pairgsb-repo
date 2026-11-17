@@ -1,0 +1,8 @@
+quota:
+  requests_per_minute: 3000
+  tags:
+    - tier-gold
+features:
+  webhooks: true
+callbacks:
+  primary: https://hooks.example.test/tenant

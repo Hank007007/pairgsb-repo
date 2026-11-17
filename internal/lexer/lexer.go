@@ -2,6 +2,7 @@
 package lexer
 
 import (
+	"math"
 	"strconv"
 
 	"rulelang/internal/limits"
@@ -202,9 +203,7 @@ func scanString(src string, start int) (string, int, error) {
 		}
 		if c == '\\' {
 			if i+1 >= len(src) {
-				out = append(out, c)
-				i++
-				continue
+				return "", 0, rlerr.New(rlerr.StageLex, i, "unterminated escape sequence in string")
 			}
 			esc := src[i+1]
 			switch esc {
@@ -217,7 +216,7 @@ func scanString(src string, start int) (string, int, error) {
 			case 't':
 				out = append(out, '\t')
 			default:
-				out = append(out, esc)
+				return "", 0, rlerr.New(rlerr.StageLex, i, "invalid escape sequence \\"+string(esc)+" in string")
 			}
 			i += 2
 			continue
@@ -245,7 +244,10 @@ func scanNumber(src string, start int) (Token, int, error) {
 	if i < len(src) && isIdentStart(src[i]) {
 		return Token{}, 0, rlerr.New(rlerr.StageLex, i, "identifier cannot start with a digit")
 	}
-	v := parseInt64(digits)
+	v, err := parseInt64(digits)
+	if err != nil {
+		return Token{}, 0, rlerr.New(rlerr.StageLex, start, "integer literal overflows int64")
+	}
 	return Token{Kind: Int, Text: digits, IntVal: v, Pos: start}, i, nil
 }
 
@@ -295,8 +297,16 @@ func quoteByte(c byte) string {
 	return "'\\x" + string([]byte{hex[c>>4], hex[c&0x0f]}) + "'"
 }
 
-// parseInt64 converts a run of decimal digits to an integer value.
-func parseInt64(digits string) int64 {
-	v, _ := strconv.Atoi(digits)
-	return int64(v)
+// parseInt64 converts a run of decimal digits to an integer value. It rejects
+// values outside the int64 range instead of silently wrapping or truncating.
+func parseInt64(digits string) (int64, error) {
+	var v int64
+	for i := 0; i < len(digits); i++ {
+		d := int64(digits[i] - '0')
+		if v > (math.MaxInt64-d)/10 {
+			return 0, strconv.ErrRange
+		}
+		v = v*10 + d
+	}
+	return v, nil
 }

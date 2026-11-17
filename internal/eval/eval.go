@@ -3,8 +3,8 @@ package eval
 
 import (
 	"fmt"
+	"net/netip"
 	"strconv"
-	"strings"
 
 	"rulelang/internal/ast"
 	"rulelang/internal/rlerr"
@@ -51,8 +51,14 @@ type Context map[string]Value
 
 // Eval evaluates a compiled rule against ctx.
 func Eval(expr ast.Expr, ctx Context) (bool, error) {
+	if expr == nil {
+		return false, rlerr.New(rlerr.StageEval, 0, "cannot evaluate an empty rule")
+	}
 	switch node := expr.(type) {
 	case *ast.Logical:
+		if node == nil || node.Left == nil || node.Right == nil {
+			return false, rlerr.New(rlerr.StageEval, node.Pos(), "logical expression is incomplete")
+		}
 		left, err := Eval(node.Left, ctx)
 		if err != nil {
 			return false, err
@@ -72,6 +78,9 @@ func Eval(expr ast.Expr, ctx Context) (bool, error) {
 		return false, rlerr.New(rlerr.StageEval, node.Pos(), "unknown logical operator "+node.Op)
 
 	case *ast.Not:
+		if node == nil || node.Operand == nil {
+			return false, rlerr.New(rlerr.StageEval, node.Pos(), "negation is incomplete")
+		}
 		value, err := Eval(node.Operand, ctx)
 		if err != nil {
 			return false, err
@@ -79,6 +88,9 @@ func Eval(expr ast.Expr, ctx Context) (bool, error) {
 		return !value, nil
 
 	case *ast.Compare:
+		if node == nil || node.Left == nil || node.Right == nil {
+			return false, rlerr.New(rlerr.StageEval, node.Pos(), "comparison is incomplete")
+		}
 		return evalCompare(node, ctx)
 	}
 
@@ -139,39 +151,37 @@ func evalIn(node *ast.Compare, ctx Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	leftText := left.Text()
 
 	if cidr, ok := node.Right.(*ast.CIDR); ok {
-		return matchCIDR(leftText, cidr.Text), nil
+		return matchCIDR(left.Text(), cidr.Text, node.Pos())
 	}
 
 	right, err := resolve(node.Right, ctx)
 	if err != nil {
 		return false, err
 	}
-	return leftText == right.Text(), nil
+	return left.Text() == right.Text(), nil
 }
 
-// matchCIDR reports whether ip falls inside the network written in cidr.
-func matchCIDR(ip, cidr string) bool {
-	slash := strings.IndexByte(cidr, '/')
-	if slash < 0 {
-		return false
+// matchCIDR reports whether ip falls inside the network written in cidr. The
+// decision is made on the binary network prefix, not on textual prefixes of
+// the address. A malformed address or network is an evaluation error.
+func matchCIDR(ip, cidr string, pos int) (bool, error) {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return false, rlerr.New(rlerr.StageEval, pos, "invalid ip address "+ip)
 	}
-	bits, err := strconv.Atoi(cidr[slash+1:])
-	if err != nil || bits < 0 || bits > 32 {
-		return false
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return false, rlerr.New(rlerr.StageEval, pos, "invalid cidr "+cidr)
 	}
-	network := strings.Split(cidr[:slash], ".")
-	octets := bits / 8
-	if octets > len(network) {
-		octets = len(network)
-	}
-	prefix := strings.Join(network[:octets], ".")
-	return strings.HasPrefix(ip, prefix)
+	return prefix.Contains(addr), nil
 }
 
 func resolve(n ast.Node, ctx Context) (Value, error) {
+	if n == nil {
+		return Value{}, rlerr.New(rlerr.StageEval, 0, "missing operand")
+	}
 	switch v := n.(type) {
 	case *ast.Field:
 		value, ok := ctx[v.Name]

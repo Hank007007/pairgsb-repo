@@ -30,6 +30,7 @@ type parser struct {
 	toks  []lexer.Token
 	pos   int
 	nodes int
+	depth int
 }
 
 func (p *parser) peek() lexer.Token {
@@ -56,57 +57,115 @@ func (p *parser) bump(pos int) error {
 	return nil
 }
 
+// expr := orExpr
 func (p *parser) parseExpr() (ast.Expr, error) {
-	return p.parseBinary()
+	return p.parseOr()
 }
 
-// parseBinary parses a chain of boolean operators.
-func (p *parser) parseBinary() (ast.Expr, error) {
-	left, err := p.parseComparison()
+// orExpr := andExpr ( "or" andExpr )*
+func (p *parser) parseOr() (ast.Expr, error) {
+	left, err := p.parseAnd()
 	if err != nil {
 		return nil, err
 	}
-	if !isBoolExpr(left) {
-		return nil, rlerr.New(rlerr.StageParse, left.Pos(), "expected a comparison, got "+left.Kind())
-	}
-	for {
-		kind := p.peek().Kind
-		if kind != lexer.And && kind != lexer.Or {
-			return left, nil
-		}
+	for p.peek().Kind == lexer.Or {
 		op := p.next()
-		right, err := p.parseComparison()
+		right, err := p.parseAnd()
 		if err != nil {
 			return nil, err
-		}
-		if !isBoolExpr(right) {
-			return nil, rlerr.New(rlerr.StageParse, right.Pos(), "expected a comparison, got "+right.Kind())
 		}
 		if err := p.bump(op.Pos); err != nil {
 			return nil, err
 		}
 		left = &ast.Logical{Op: op.Text, Left: left, Right: right, Off: op.Pos}
 	}
+	return left, nil
 }
 
-// parseComparison parses an optional comparison or membership operator between
-// two unary expressions.
-func (p *parser) parseComparison() (ast.Expr, error) {
-	left, err := p.parseUnary()
+// andExpr := notExpr ( "and" notExpr )*
+func (p *parser) parseAnd() (ast.Expr, error) {
+	left, err := p.parseNot()
 	if err != nil {
 		return nil, err
 	}
-	kind := p.peek().Kind
-	if !isCompareOp(kind) {
+	for p.peek().Kind == lexer.And {
+		op := p.next()
+		right, err := p.parseNot()
+		if err != nil {
+			return nil, err
+		}
+		if err := p.bump(op.Pos); err != nil {
+			return nil, err
+		}
+		left = &ast.Logical{Op: op.Text, Left: left, Right: right, Off: op.Pos}
+	}
+	return left, nil
+}
+
+// notExpr := "not" notExpr | primary
+//
+// A negation wraps the whole comparison that follows it, so "not a == b"
+// parses as "not (a == b)".
+func (p *parser) parseNot() (ast.Expr, error) {
+	if p.peek().Kind != lexer.Not {
+		return p.parsePrimary()
+	}
+	tok := p.next()
+	operand, err := p.parseNot()
+	if err != nil {
+		return nil, err
+	}
+	if !isBoolExpr(operand) {
+		return nil, rlerr.New(rlerr.StageParse, operand.Pos(), "not must wrap a boolean expression, got "+operand.Kind())
+	}
+	if err := p.bump(tok.Pos); err != nil {
+		return nil, err
+	}
+	return &ast.Not{Operand: operand, Off: tok.Pos}, nil
+}
+
+// primary := "(" expr ")" | comparison
+// comparison := operand cmpOp operand
+// operand := ident | string | integer | cidr
+func (p *parser) parsePrimary() (ast.Expr, error) {
+	if p.peek().Kind == lexer.LParen {
+		tok := p.next()
+		p.depth++
+		if p.depth > limits.MaxParenDepth {
+			return nil, rlerr.New(rlerr.StageLimit, tok.Pos, "parenthesis nesting is too deep")
+		}
+		inner, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if p.peek().Kind != lexer.RParen {
+			return nil, unexpected(p.peek(), "')'")
+		}
+		p.next()
+		p.depth--
+		return inner, nil
+	}
+	return p.parseComparison()
+}
+
+// parseComparison parses "operand cmpOp operand". The left operand must be a
+// field reference; a literal there is rejected.
+func (p *parser) parseComparison() (ast.Expr, error) {
+	leftTok := p.peek()
+	left, err := p.parseOperand()
+	if err != nil {
+		return nil, err
+	}
+	if !isCompareOp(p.peek().Kind) {
 		return left, nil
 	}
 	op := p.next()
-	right, err := p.parseUnary()
+	right, err := p.parseOperand()
 	if err != nil {
 		return nil, err
 	}
-	if isLiteral(left) {
-		return nil, rlerr.New(rlerr.StageParse, left.Pos(), "left operand of "+op.Text+" must be a field")
+	if leftTok.Kind != lexer.Ident {
+		return nil, rlerr.New(rlerr.StageParse, leftTok.Pos, "left operand of "+op.Text+" must be a field")
 	}
 	if right.Kind() == "cidr" && op.Kind != lexer.In {
 		return nil, rlerr.New(rlerr.StageParse, right.Pos(), "cidr literal is only valid with 'in'")
@@ -117,59 +176,28 @@ func (p *parser) parseComparison() (ast.Expr, error) {
 	return &ast.Compare{Op: op.Text, Left: left, Right: right, Off: op.Pos}, nil
 }
 
-// parseUnary parses a logical negation or falls through to a primary.
-func (p *parser) parseUnary() (ast.Expr, error) {
-	if p.peek().Kind == lexer.Not {
-		tok := p.next()
-		operand, err := p.parsePrimary()
-		if err != nil {
-			return nil, err
-		}
-		if err := p.bump(tok.Pos); err != nil {
-			return nil, err
-		}
-		return &ast.Not{Operand: operand, Off: tok.Pos}, nil
-	}
-	return p.parsePrimary()
-}
-
-// parsePrimary parses a parenthesized expression or a single operand.
-func (p *parser) parsePrimary() (ast.Expr, error) {
+// parseOperand parses a single operand token.
+func (p *parser) parseOperand() (ast.Expr, error) {
 	tok := p.peek()
 	switch tok.Kind {
-	case lexer.LParen:
-		p.next()
-		inner, err := p.parseExpr()
-		if err != nil {
-			return nil, err
-		}
-		if p.peek().Kind != lexer.RParen {
-			return nil, unexpected(p.peek(), "')'")
-		}
-		p.next()
-		return inner, nil
-
 	case lexer.Ident:
 		p.next()
 		if err := p.bump(tok.Pos); err != nil {
 			return nil, err
 		}
 		return &ast.Field{Name: tok.Text, Off: tok.Pos}, nil
-
 	case lexer.String:
 		p.next()
 		if err := p.bump(tok.Pos); err != nil {
 			return nil, err
 		}
 		return &ast.StringLiteral{Value: tok.Text, Off: tok.Pos}, nil
-
 	case lexer.Int:
 		p.next()
 		if err := p.bump(tok.Pos); err != nil {
 			return nil, err
 		}
 		return &ast.IntLiteral{Value: tok.IntVal, Off: tok.Pos}, nil
-
 	case lexer.CIDR:
 		p.next()
 		if err := p.bump(tok.Pos); err != nil {
@@ -177,21 +205,12 @@ func (p *parser) parsePrimary() (ast.Expr, error) {
 		}
 		return &ast.CIDR{Text: tok.Text, Off: tok.Pos}, nil
 	}
-
 	return nil, unexpected(tok, "expression")
 }
 
 func isCompareOp(k lexer.Kind) bool {
 	switch k {
 	case lexer.Eq, lexer.Ne, lexer.Lt, lexer.Le, lexer.Gt, lexer.Ge, lexer.In:
-		return true
-	}
-	return false
-}
-
-func isLiteral(n ast.Node) bool {
-	switch n.(type) {
-	case *ast.StringLiteral, *ast.IntLiteral, *ast.CIDR:
 		return true
 	}
 	return false

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "formpost"
+version = "0.1.0"
+description = "multipart/form-data parsing layer for the ticket submission endpoint"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["formpost"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

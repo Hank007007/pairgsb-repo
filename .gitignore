@@ -1,0 +1,31 @@
+# Byte-compiled / cached files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test and coverage artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# Virtual environments and build output
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# Local service state and logs
+.glassbreak-state.json
+*.log
+
+# Editor and OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Build-time prompt material kept outside version control
+.build.prompt.txt

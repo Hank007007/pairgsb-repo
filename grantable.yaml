@@ -1,0 +1,16 @@
+# Scopes that may be added on top of a member's baseline access.
+#
+# Anything not listed here is outside the elevation catalogue, even if the
+# upstream identity provider would accept it.
+
+max_ttl_minutes: 120
+
+grantable:
+  - db:read
+  - db:write
+  - db:snapshot
+  - deploy:rollback
+  - deploy:hotfix
+  - logs:read
+  - secrets:read
+  - queue:drain

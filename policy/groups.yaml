@@ -1,0 +1,33 @@
+# Team membership, baseline access, and approval requirements.
+#
+# A principal belongs to exactly one group. Approval votes are counted per
+# request against the group that owns the requesting principal.
+
+approval_window_minutes: 30
+
+groups:
+  sre:
+    required_votes: 2
+    base_scopes:
+      - logs:read
+      - metrics:read
+    members:
+      - alice
+      - bob
+      - carol
+      - dave
+  dba:
+    required_votes: 2
+    base_scopes:
+      - db:read
+    members:
+      - erin
+      - frank
+      - grace
+  platform:
+    required_votes: 1
+    base_scopes:
+      - deploy:status
+    members:
+      - heidi
+      - ivan

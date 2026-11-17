@@ -6,7 +6,6 @@ export class SecretError extends Error {
 }
 
 const SECRET_PREFIX = 'RUNWRIGHT_SECRET_';
-const MIN_MASK_LENGTH = 8;
 
 export class SecretStore {
   constructor(entries = {}) {
@@ -56,7 +55,6 @@ export class SecretStore {
     let output = String(text);
     const candidates = [...this.values.values()].sort((a, b) => b.length - a.length);
     for (const secret of candidates) {
-      if (secret.length < MIN_MASK_LENGTH) continue;
       output = output.split(secret).join('***');
     }
     return output;

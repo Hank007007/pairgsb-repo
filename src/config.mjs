@@ -5,6 +5,32 @@ export class ConfigError extends Error {
   }
 }
 
+const RESERVED_ENV_NAMES = new Set([
+  'NODE_OPTIONS',
+  'NODE_PATH',
+  'NODE_EXTRA_CA_CERTS',
+  'PATH',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  'DYLD_INSERT_LIBRARIES',
+  'SHELL',
+  'COMSPEC',
+  'PATHEXT',
+]);
+
+export function isReservedEnvName(name) {
+  const upper = String(name).toUpperCase();
+  return RESERVED_ENV_NAMES.has(upper) || upper.startsWith('RUNWRIGHT_');
+}
+
+function assertEnvKeysAllowed(mapping, field) {
+  for (const key of Object.keys(mapping)) {
+    if (isReservedEnvName(key)) {
+      throw new ConfigError(`"${field}.${key}" names a reserved environment variable`);
+    }
+  }
+}
+
 export function normalizePipeline(document) {
   if (document === null || typeof document !== 'object' || Array.isArray(document)) {
     throw new ConfigError('pipeline must be a mapping');
@@ -12,6 +38,7 @@ export function normalizePipeline(document) {
 
   const name = optionalString(document.name, 'name') ?? 'pipeline';
   const env = normalizeEnv(document.env, 'env');
+  assertEnvKeysAllowed(env, 'env');
 
   if (document.jobs === null || typeof document.jobs !== 'object' || Array.isArray(document.jobs)) {
     throw new ConfigError('pipeline must declare a "jobs" mapping');
@@ -33,6 +60,7 @@ function normalizeJob(id, rawJob) {
   }
 
   const env = normalizeEnv(rawJob.env, `jobs.${id}.env`);
+  assertEnvKeysAllowed(env, `jobs.${id}.env`);
   const matrix = normalizeEnv(rawJob.matrix, `jobs.${id}.matrix`);
   const needs = normalizeNeeds(rawJob.needs, `jobs.${id}.needs`);
 
@@ -88,13 +116,20 @@ function normalizeStep(jobId, index, rawStep) {
     condition = rawStep.if;
   }
 
+  const stepEnv = normalizeEnv(rawStep.env, `${label}.env`);
+  assertEnvKeysAllowed(stepEnv, `${label}.env`);
+  const stepWith = normalizeEnv(rawStep.with, `${label}.with`);
+  if (hasRun) {
+    assertEnvKeysAllowed(stepWith, `${label}.with`);
+  }
+
   return {
     index,
     name: name ?? `step ${index + 1}`,
     run: hasRun ? rawStep.run : null,
     uses: hasUses ? rawStep.uses : null,
-    with: normalizeEnv(rawStep.with, `${label}.with`),
-    env: normalizeEnv(rawStep.env, `${label}.env`),
+    with: stepWith,
+    env: stepEnv,
     if: condition,
     continueOnError: rawStep['continue-on-error'] === true,
   };

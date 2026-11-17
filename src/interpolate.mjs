@@ -25,13 +25,62 @@ export function renderScript(script, contexts, options = {}) {
   const field = options.field ?? 'run';
   const source = String(script);
   assertNoSecretReferences(source, options.secrets ?? null, field);
-  return replaceWrappers(source, (expression) => {
-    const result = evaluate(expression, contexts, { secrets: options.secrets ?? null, field });
-    if (result !== null && typeof result === 'object') {
-      throw new ExpressionError(`"${expression.trim()}" cannot be inserted into a script`);
+
+  let output = '';
+  let index = 0;
+  let quote = null;
+
+  while (index < source.length) {
+    if (source.startsWith('${{', index)) {
+      const close = source.indexOf('}}', index + 3);
+      if (close === -1) {
+        throw new ConfigError(`unterminated expression in "${field}"`);
+      }
+      const expression = source.slice(index + 3, close);
+      const result = evaluate(expression, contexts, {
+        secrets: options.secrets ?? null,
+        field,
+      });
+      if (result !== null && typeof result === 'object') {
+        throw new ExpressionError(`"${expression.trim()}" cannot be inserted into a script`);
+      }
+      const word = shellQuote(toText(result));
+      if (quote === "'") {
+        output += `'${word}'`;
+      } else if (quote === '"') {
+        output += `"${word}"`;
+      } else {
+        output += word;
+      }
+      index = close + 2;
+      continue;
     }
-    return String(result);
-  }, field);
+
+    const char = source[index];
+    output += char;
+    if (quote === "'") {
+      if (char === "'") quote = null;
+    } else if (quote === '"') {
+      if (char === '\\' && index + 1 < source.length) {
+        output += source[index + 1];
+        index += 1;
+      } else if (char === '"') {
+        quote = null;
+      }
+    } else if (char === '\\' && index + 1 < source.length) {
+      output += source[index + 1];
+      index += 1;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+    }
+    index += 1;
+  }
+
+  return output;
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
 export function interpolateEnvMapping(mapping, contexts, options = {}) {

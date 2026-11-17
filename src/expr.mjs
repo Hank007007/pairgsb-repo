@@ -8,7 +8,7 @@ export class ExpressionError extends Error {
 export const ALLOWED_ROOTS = Object.freeze(['github', 'env', 'matrix', 'needs']);
 
 const ALLOWED_ROOT_SET = new Set(ALLOWED_ROOTS);
-const PATH_PATTERN = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[\d+\])*$/;
+const FORBIDDEN_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
 
 export function isExpressionWrapper(text) {
   return /\$\{\{/.test(String(text));
@@ -31,25 +31,8 @@ export function evaluate(source, contexts = {}, options = {}) {
     throw new ExpressionError('empty expression');
   }
 
-  if (PATH_PATTERN.test(text)) {
-    return resolvePath(text, contexts);
-  }
-
-  const body = `with (__contexts__) { return (${strictComparisons(text)}); }`;
-  let program;
-  try {
-    program = new Function('__contexts__', body);
-  } catch (error) {
-    throw new ExpressionError(`malformed expression: ${error.message}`);
-  }
-
-  let value;
-  try {
-    value = program(contexts);
-  } catch (error) {
-    if (error instanceof ExpressionError) throw error;
-    throw new ExpressionError(error && error.message ? error.message : 'expression failed');
-  }
+  const node = parseExpression(text);
+  const value = evaluateNode(node, contexts);
 
   if (typeof value === 'function') {
     throw new ExpressionError('expression produced a function');
@@ -66,6 +49,10 @@ export function evaluate(source, contexts = {}, options = {}) {
 export function resolvePath(path, contexts = {}) {
   const text = String(path).trim();
   const segments = tokenizePath(text);
+  return resolveSegments(segments, contexts, text);
+}
+
+function resolveSegments(segments, contexts, text) {
   const root = segments[0];
 
   if (!ALLOWED_ROOT_SET.has(root)) {
@@ -78,8 +65,27 @@ export function resolvePath(path, contexts = {}) {
   let current = contexts[root];
   for (let index = 1; index < segments.length; index += 1) {
     const segment = segments[index];
+    if (typeof segment === 'string' && FORBIDDEN_SEGMENTS.has(segment)) {
+      throw new ExpressionError(`"${text}" may not read "${segment}"`);
+    }
     if (current === null || current === undefined) {
       throw new ExpressionError(`cannot read "${segment}" of ${String(current)} in "${text}"`);
+    }
+    if (typeof segment === 'number') {
+      if (!Array.isArray(current)) {
+        throw new ExpressionError(`cannot index a non-array in "${text}"`);
+      }
+      if (segment >= current.length) {
+        throw new ExpressionError(`index ${segment} is out of range in "${text}"`);
+      }
+      current = current[segment];
+      continue;
+    }
+    if (typeof current !== 'object') {
+      throw new ExpressionError(`cannot read "${segment}" of ${String(current)} in "${text}"`);
+    }
+    if (!Object.prototype.hasOwnProperty.call(current, segment)) {
+      throw new ExpressionError(`"${text}" is not defined`);
     }
     current = current[segment];
   }
@@ -154,53 +160,254 @@ export function assertNoSecretReferences(source, secrets = null, field = 'expres
   );
 }
 
-function strictComparisons(text) {
-  let output = '';
-  let index = 0;
+const STRING_ESCAPES = {
+  n: '\n',
+  t: '\t',
+  r: '\r',
+  '\\': '\\',
+  "'": "'",
+  '"': '"',
+};
 
-  while (index < text.length) {
-    const char = text[index];
-    if (char === '"' || char === "'" || char === '`') {
-      const quote = char;
-      output += char;
-      index += 1;
-      while (index < text.length) {
-        const inner = text[index];
-        output += inner;
-        if (inner === '\\') {
-          index += 1;
-          if (index < text.length) output += text[index];
-          index += 1;
-          continue;
-        }
-        index += 1;
-        if (inner === quote) break;
-      }
-      continue;
-    }
-    if (char === '=' && text.startsWith('==', index)) {
-      if (text.startsWith('===', index)) {
-        output += '===';
-        index += 3;
-      } else {
-        output += '===';
-        index += 2;
-      }
-      continue;
-    }
-    if (char === '!' && text.startsWith('!=', index)) {
-      if (text.startsWith('!==', index)) {
-        output += '!==';
-        index += 3;
-      } else {
-        output += '!==';
-        index += 2;
-      }
-      continue;
-    }
-    output += char;
-    index += 1;
+function parseExpression(text) {
+  const state = { text, index: 0 };
+  const node = parseOr(state);
+  skipSpace(state);
+  if (state.index < text.length) {
+    throw new ExpressionError(`malformed expression: unexpected "${text.slice(state.index)}"`);
   }
+  return node;
+}
 
-  return output;
+function skipSpace(state) {
+  while (state.index < state.text.length && /\s/.test(state.text[state.index])) {
+    state.index += 1;
+  }
+}
+
+function matchOperator(state, operator) {
+  skipSpace(state);
+  if (state.text.startsWith(operator, state.index)) {
+    state.index += operator.length;
+    return true;
+  }
+  return false;
+}
+
+function parseOr(state) {
+  let left = parseAnd(state);
+  while (matchOperator(state, '||')) {
+    left = { type: 'or', left, right: parseAnd(state) };
+  }
+  return left;
+}
+
+function parseAnd(state) {
+  let left = parseEquality(state);
+  while (matchOperator(state, '&&')) {
+    left = { type: 'and', left, right: parseEquality(state) };
+  }
+  return left;
+}
+
+function parseEquality(state) {
+  let left = parseRelational(state);
+  for (;;) {
+    if (matchOperator(state, '==')) {
+      left = { type: 'compare', op: '==', left, right: parseRelational(state) };
+    } else if (matchOperator(state, '!=')) {
+      left = { type: 'compare', op: '!=', left, right: parseRelational(state) };
+    } else {
+      return left;
+    }
+  }
+}
+
+function parseRelational(state) {
+  let left = parseUnary(state);
+  for (;;) {
+    if (matchOperator(state, '<=')) {
+      left = { type: 'compare', op: '<=', left, right: parseUnary(state) };
+    } else if (matchOperator(state, '>=')) {
+      left = { type: 'compare', op: '>=', left, right: parseUnary(state) };
+    } else if (matchOperator(state, '<')) {
+      left = { type: 'compare', op: '<', left, right: parseUnary(state) };
+    } else if (matchOperator(state, '>')) {
+      left = { type: 'compare', op: '>', left, right: parseUnary(state) };
+    } else {
+      return left;
+    }
+  }
+}
+
+function parseUnary(state) {
+  skipSpace(state);
+  if (state.text[state.index] === '!' && state.text[state.index + 1] !== '=') {
+    state.index += 1;
+    return { type: 'not', operand: parseUnary(state) };
+  }
+  return parsePrimary(state);
+}
+
+function parsePrimary(state) {
+  skipSpace(state);
+  const char = state.text[state.index];
+  if (char === undefined) {
+    throw new ExpressionError('malformed expression: unexpected end of input');
+  }
+  if (char === '(') {
+    state.index += 1;
+    const node = parseOr(state);
+    skipSpace(state);
+    if (state.text[state.index] !== ')') {
+      throw new ExpressionError('malformed expression: missing ")"');
+    }
+    state.index += 1;
+    return node;
+  }
+  if (char === "'" || char === '"') {
+    return { type: 'literal', value: readString(state) };
+  }
+  if (/[0-9]/.test(char)) {
+    return { type: 'literal', value: readNumber(state) };
+  }
+  if (/[A-Za-z_$]/.test(char)) {
+    return readIdentifierOrPath(state);
+  }
+  throw new ExpressionError(`malformed expression: unexpected "${char}"`);
+}
+
+function readString(state) {
+  const quote = state.text[state.index];
+  state.index += 1;
+  let value = '';
+  while (state.index < state.text.length) {
+    const char = state.text[state.index];
+    if (char === '\\') {
+      state.index += 1;
+      if (state.index >= state.text.length) break;
+      const escaped = state.text[state.index];
+      value += Object.prototype.hasOwnProperty.call(STRING_ESCAPES, escaped)
+        ? STRING_ESCAPES[escaped]
+        : escaped;
+      state.index += 1;
+      continue;
+    }
+    if (char === quote) {
+      state.index += 1;
+      return value;
+    }
+    value += char;
+    state.index += 1;
+  }
+  throw new ExpressionError('malformed expression: unterminated string literal');
+}
+
+function readNumber(state) {
+  const match = /^\d+(?:\.\d+)?/.exec(state.text.slice(state.index));
+  state.index += match[0].length;
+  return Number(match[0]);
+}
+
+function readIdentifier(state) {
+  const match = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(state.text.slice(state.index));
+  if (!match) {
+    throw new ExpressionError('malformed expression: expected an identifier');
+  }
+  state.index += match[0].length;
+  return match[0];
+}
+
+function readIdentifierOrPath(state) {
+  const first = readIdentifier(state);
+  const segments = [first];
+  for (;;) {
+    const char = state.text[state.index];
+    if (char === '.') {
+      state.index += 1;
+      segments.push(readIdentifier(state));
+      continue;
+    }
+    if (char === '[') {
+      const close = state.text.indexOf(']', state.index);
+      if (close === -1) {
+        throw new ExpressionError('malformed expression: unterminated "["');
+      }
+      const inner = state.text.slice(state.index + 1, close).trim();
+      if (!/^\d+$/.test(inner)) {
+        throw new ExpressionError(`only numeric indexes are supported in "${state.text}"`);
+      }
+      segments.push(Number(inner));
+      state.index = close + 1;
+      continue;
+    }
+    break;
+  }
+  if (segments.length === 1) {
+    if (first === 'true') return { type: 'literal', value: true };
+    if (first === 'false') return { type: 'literal', value: false };
+    if (first === 'null') return { type: 'literal', value: null };
+  }
+  return { type: 'path', segments, text: formatPath(segments) };
+}
+
+function formatPath(segments) {
+  let text = String(segments[0]);
+  for (let index = 1; index < segments.length; index += 1) {
+    const segment = segments[index];
+    text += typeof segment === 'number' ? `[${segment}]` : `.${segment}`;
+  }
+  return text;
+}
+
+function evaluateNode(node, contexts) {
+  switch (node.type) {
+    case 'literal':
+      return node.value;
+    case 'path':
+      return resolveSegments(node.segments, contexts, node.text);
+    case 'not':
+      return !truthy(evaluateNode(node.operand, contexts));
+    case 'and': {
+      if (!truthy(evaluateNode(node.left, contexts))) return false;
+      return truthy(evaluateNode(node.right, contexts));
+    }
+    case 'or': {
+      if (truthy(evaluateNode(node.left, contexts))) return true;
+      return truthy(evaluateNode(node.right, contexts));
+    }
+    case 'compare':
+      return compareValues(
+        node.op,
+        evaluateNode(node.left, contexts),
+        evaluateNode(node.right, contexts),
+      );
+    default:
+      throw new ExpressionError('malformed expression');
+  }
+}
+
+function compareValues(operator, left, right) {
+  if (operator === '==') return left === right;
+  if (operator === '!=') return left !== right;
+  const bothNumbers = typeof left === 'number' && typeof right === 'number';
+  const bothStrings = typeof left === 'string' && typeof right === 'string';
+  if (!bothNumbers && !bothStrings) {
+    throw new ExpressionError(
+      `cannot order ${describeType(left)} against ${describeType(right)}`,
+    );
+  }
+  switch (operator) {
+    case '<': return left < right;
+    case '<=': return left <= right;
+    case '>': return left > right;
+    case '>=': return left >= right;
+    default: throw new ExpressionError(`unknown operator "${operator}"`);
+  }
+}
+
+function describeType(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
 }

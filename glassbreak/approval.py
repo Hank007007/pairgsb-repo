@@ -6,6 +6,9 @@ from datetime import datetime
 
 from .elevate import planned_scope
 from .errors import (
+    ApproverOutsideGroup,
+    DuplicateVoteNotAllowed,
+    NamedApproverCannotApprove,
     RequestExpired,
     RequestNotPending,
     SelfApprovalNotAllowed,
@@ -38,10 +41,25 @@ def cast_vote(
     if voter == request.subject:
         raise SelfApprovalNotAllowed("a request cannot be approved by its subject")
 
+    if policy.group_of(voter) != policy.group_of(request.subject):
+        raise ApproverOutsideGroup(
+            f"voter {voter!r} is not in the subject's group"
+        )
+
+    if request.named_approver is not None and voter == request.named_approver:
+        raise NamedApproverCannotApprove(
+            f"voter {voter!r} was named in the request and cannot approve it"
+        )
+
+    if voter in request.approvers:
+        raise DuplicateVoteNotAllowed(
+            f"voter {voter!r} has already voted on this request"
+        )
+
     request.approvers.append(voter)
 
     required = policy.required_votes(request.subject)
-    if len(request.approvers) >= required:
+    if len(set(request.approvers)) >= required:
         request.status = RequestStatus.APPROVED
         request.approved_at = now
         request.scope_at_approval = frozenset(

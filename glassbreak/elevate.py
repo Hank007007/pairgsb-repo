@@ -12,4 +12,7 @@ def planned_scope(
 ) -> set[str]:
     """Combine baseline access with the additional scopes asked for."""
 
-    return set(base_scopes) | set(requested_scopes)
+    # §2.2/§2.4: only requested scopes that appear verbatim in the grantable
+    # catalogue may be added.  Baseline scopes are always retained (§2.3).
+    granted = set(requested_scopes).intersection(grantable)
+    return set(base_scopes) | granted

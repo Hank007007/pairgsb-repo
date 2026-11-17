@@ -91,15 +91,18 @@ class GlassbreakService:
 
         request = self.get_request(request_id)
         now = self._clock()
-        cast_vote(request, voter, self.policy, now)
-        self.audit.record(
-            "request.vote",
-            at=now,
-            request_id=request.request_id,
-            actor=voter,
-            status=request.status.value,
-            vote_count=len(request.approvers),
-        )
+        try:
+            cast_vote(request, voter, self.policy, now)
+        finally:
+            # §7.1: every vote is audited, including votes that are rejected.
+            self.audit.record(
+                "request.vote",
+                at=now,
+                request_id=request.request_id,
+                actor=voter,
+                status=request.status.value,
+                vote_count=len(request.approvers),
+            )
         if request.is_approved:
             self.audit.record(
                 "request.approved",
@@ -116,6 +119,12 @@ class GlassbreakService:
         """Issue the credential for an approved request."""
 
         request = self.get_request(request_id)
+        existing = self._ledger.for_request(request.request_id)
+        if existing is not None:
+            # §6.4: repeat calls hand back the same credential, unchanged,
+            # and do not produce a fresh issuance event.
+            return existing
+
         now = self._clock()
         issued = credential_module.issue(request, self.policy, now, self._ledger)
         self.audit.record(

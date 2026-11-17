@@ -52,14 +52,27 @@ def issue(
             f"request {request.request_id} is {request.status}, not approved"
         )
 
-    ttl = request.duration
+    existing = ledger.for_request(request.request_id)
+    if existing is not None:
+        # §6.4: a request yields at most one credential; repeated requests
+        # return the original credential instead of extending its lifetime.
+        return existing
+
+    if request.approved_at is None:
+        raise CredentialNotAvailable(
+            f"request {request.request_id} has no recorded approval time"
+        )
+
+    # §6.1/§6.2: the lifetime is capped by max_ttl and starts at the moment
+    # the request crossed the approval threshold, not at submission time.
+    ttl = min(request.duration, policy.max_ttl)
     credential = Credential(
         credential_id=uuid.uuid4().hex,
         request_id=request.request_id,
         subject=request.subject,
         scopes=frozenset(request.scope_at_approval or ()),
-        issued_at=now,
-        expires_at=request.created_at + ttl,
+        issued_at=request.approved_at,
+        expires_at=request.approved_at + ttl,
     )
 
     ledger.record(credential)

@@ -43,5 +43,9 @@ class NamedApproverCannotApprove(VoteRejected):
     """The voter is the approver named by the subject."""
 
 
+class DuplicateVoteNotAllowed(VoteRejected):
+    """The same approver cannot cast more than one vote for a request."""
+
+
 class CredentialNotAvailable(GlassbreakError):
     """No credential can be issued for the request in its current state."""

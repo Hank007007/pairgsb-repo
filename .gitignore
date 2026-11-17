@@ -1,0 +1,12 @@
+node_modules/
+coverage/
+dist/
+build/
+.cache/
+.tmp/
+data/*.tmp
+*.log
+*.tmp
+.DS_Store
+
+.build.prompt.txt

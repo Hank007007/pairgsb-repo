@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "keys": {
+    "7c1e": {
+      "id8": "7c1e",
+      "env": "prod",
+      "ownerId": "checkout-team",
+      "scopes": ["orders:read", "orders:write"],
+      "key": "kl_prod_7c1e_4fe1ff10a5161073138ec11613c87452cd44ad5ae6fc015858c93a42c9db2672",
+      "createdAt": "2026-09-02T08:15:00.000Z",
+      "rotatedAt": null,
+      "graceUntil": null,
+      "successorId8": null,
+      "revoked": false,
+      "revokedAt": null
+    },
+    "b490": {
+      "id8": "b490",
+      "env": "staging",
+      "ownerId": "search-team",
+      "scopes": ["search:read"],
+      "key": "kl_staging_b490_12c4fa07703693091a6e83ebd8bd4ee03559acc984db3dd38abab181d81c3e13",
+      "createdAt": "2026-10-11T12:40:00.000Z",
+      "rotatedAt": null,
+      "graceUntil": null,
+      "successorId8": null,
+      "revoked": false,
+      "revokedAt": null
+    },
+    "c322": {
+      "id8": "c322",
+      "env": "prod",
+      "ownerId": "billing-team",
+      "scopes": ["invoices:read"],
+      "key": "kl_prod_c322_4605cfd62c79ca9202123719ae47d42e1f09ebb663da6dfe5462b49773e5980e",
+      "createdAt": "2026-10-29T03:05:00.000Z",
+      "rotatedAt": "2026-11-02T09:30:00.000Z",
+      "graceUntil": "2026-11-03T09:30:00.000Z",
+      "successorId8": "8b1e",
+      "revoked": false,
+      "revokedAt": null
+    },
+    "8b1e": {
+      "id8": "8b1e",
+      "env": "prod",
+      "ownerId": "billing-team",
+      "scopes": ["invoices:read"],
+      "key": "kl_prod_8b1e_9d0d1c3a5b7f2e648ca1d4b6f8092a3c5e7d1f4b6a8c0e2f4d6b8a0c2e4f6d8a",
+      "createdAt": "2026-11-02T09:30:00.000Z",
+      "rotatedAt": null,
+      "graceUntil": null,
+      "successorId8": null,
+      "revoked": false,
+      "revokedAt": null
+    }
+  }
+}

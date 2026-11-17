@@ -1,0 +1,18 @@
+{
+  "name": "sidemount",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Injection sidecar that materializes broker-issued secrets as read-only files",
+  "type": "module",
+  "main": "src/cli.js",
+  "bin": {
+    "sidemount": "src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "ttlSeconds": 600,
+  "secrets": {
+    "db_password": "sample-db-password",
+    "api_key": "sample-api-key"
+  }
+}

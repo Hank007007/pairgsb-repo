@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "admin-any",
+      "pattern": "/admin/*",
+      "methods": ["GET", "POST"],
+      "scopes": ["admin"]
+    },
+    {
+      "id": "admin-audit",
+      "pattern": "/admin/audit",
+      "methods": ["GET", "POST", "DELETE"],
+      "scopes": ["admin", "audit"]
+    },
+    {
+      "id": "admin-user-list",
+      "pattern": "/admin/users",
+      "methods": ["GET"],
+      "scopes": ["admin"]
+    },
+    {
+      "id": "admin-user-purge",
+      "pattern": "/admin/users",
+      "methods": ["DELETE"],
+      "scopes": ["users:purge"]
+    },
+    {
+      "id": "api-secret",
+      "pattern": "/api/*/secret",
+      "methods": ["GET"],
+      "scopes": ["api:secret"]
+    },
+    {
+      "id": "api-root",
+      "pattern": "/api/*",
+      "methods": ["GET"],
+      "scopes": ["api:read"]
+    },
+    {
+      "id": "health",
+      "pattern": "/health",
+      "methods": ["GET"],
+      "scopes": []
+    },
+    {
+      "id": "internal-reports",
+      "pattern": "/internal/*",
+      "methods": ["GET"],
+      "scopes": ["internal"],
+      "tenants": ["acme-internal"]
+    }
+  ]
+}

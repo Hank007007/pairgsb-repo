@@ -54,14 +54,11 @@ func Decode(buf []byte) (*Frame, error) {
 	}
 
 	body := buf[r.Pos() : r.Pos()+int(bodyLen)]
-	d := &decoder{r: NewReader(body), elemCount: 1}
+	d := &decoder{r: NewReader(body)}
 
 	root, err := d.decodeValue(1)
 	if err != nil {
 		return nil, err
-	}
-	if d.elemCount > MaxElements {
-		return nil, ErrTooManyElements
 	}
 
 	fields, ok := root.(map[string]any)
@@ -109,6 +106,10 @@ func Decode(buf []byte) (*Frame, error) {
 		frame.Payload = payload
 	}
 
+	if d.r.Remaining() != 0 {
+		return nil, ErrTrailingBytes
+	}
+
 	return frame, nil
 }
 
@@ -117,6 +118,19 @@ func (d *decoder) decodeValue(depth int) (any, error) {
 	tag, err := d.r.ReadByte()
 	if err != nil {
 		return nil, err
+	}
+
+	// Every decoded value, the root included, counts once toward the
+	// frame-wide element budget. Map keys and values are separate values.
+	d.elemCount++
+	if d.elemCount > MaxElements {
+		return nil, ErrTooManyElements
+	}
+
+	// A container at MaxDepth may still hold scalar children; only nesting
+	// another container past the limit is rejected.
+	if (tag == tagArray || tag == tagMap) && depth >= MaxDepth {
+		return nil, ErrDepthExceeded
 	}
 
 	switch tag {
@@ -138,14 +152,10 @@ func (d *decoder) decodeContainer(tag byte, depth int) (any, error) {
 		return nil, err
 	}
 
-	if tag == tagMap && depth == 1 {
-		d.elemCount += 2 * int(count)
-	}
-
 	if tag == tagArray {
-		return d.decodeArray(count, depth)
+		return d.decodeArray(count, depth+1)
 	}
-	return d.decodeMap(count, depth)
+	return d.decodeMap(count, depth+1)
 }
 
 // decodeArray consumes count values and returns them in order.
@@ -176,6 +186,9 @@ func (d *decoder) decodeMap(count uint32, depth int) (map[string]any, error) {
 		val, err := d.decodeValue(depth)
 		if err != nil {
 			return nil, err
+		}
+		if _, exists := out[key]; exists {
+			return nil, ErrDuplicateKey
 		}
 		out[key] = val
 	}

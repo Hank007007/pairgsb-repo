@@ -35,19 +35,33 @@ func (r *Reader) ReadByte() (byte, error) {
 }
 
 // ReadUVarint consumes an unsigned LEB128 encoded u32 from the frame buffer.
+// A u32 occupies at most 5 bytes, and the fifth byte may use only its low
+// four bits; any longer encoding or any bit outside the u32 range is an
+// overflow rather than a silently truncated value.
 func (r *Reader) ReadUVarint() (uint32, error) {
 	var value uint32
-	var shift uint
-	for i := 0; i < binary.MaxVarintLen64; i++ {
+	for i := 0; i < binary.MaxVarintLen32; i++ {
 		b, err := r.ReadByte()
 		if err != nil {
 			return 0, err
 		}
-		value |= uint32(b&0x7f) << shift
+		if i == binary.MaxVarintLen32-1 {
+			// The fifth byte carries only the top four bits of the u32.
+			if b&0xf0 != 0 {
+				return 0, ErrVarintOverflow
+			}
+			value |= uint32(b) << 28
+			// A continuation bit would require a sixth byte, which has no
+			// room in a u32.
+			if b&0x80 != 0 {
+				return 0, ErrVarintOverflow
+			}
+			return value, nil
+		}
+		value |= uint32(b&0x7f) << (7 * i)
 		if b&0x80 == 0 {
 			return value, nil
 		}
-		shift += 7
 	}
 	return 0, ErrVarintOverflow
 }
@@ -58,6 +72,9 @@ func (r *Reader) ReadBytes() ([]byte, error) {
 	n, err := r.ReadUVarint()
 	if err != nil {
 		return nil, err
+	}
+	if uint64(n) > uint64(r.Remaining()) {
+		return nil, ErrLengthExceedsBuffer
 	}
 	b := r.buf[r.pos : r.pos+int(n)]
 	r.pos += int(n)

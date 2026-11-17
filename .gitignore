@@ -1,0 +1,23 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+*.a
+
+# Tool and editor caches
+/.cache/
+/.idea/
+/.vscode/
+*.swp
+.DS_Store
+
+# Local runtime artifacts
+/run/
+/*.log
+/coverage.*
+/profile.*
+
+# Harness-supplied scratch file
+/.build.prompt.txt

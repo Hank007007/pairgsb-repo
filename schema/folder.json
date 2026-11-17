@@ -1,0 +1,18 @@
+{
+  "object_type": "folder",
+  "relations": {
+    "owner": {
+      "kind": "direct"
+    },
+    "editor": {
+      "kind": "direct"
+    },
+    "viewer": {
+      "kind": "union",
+      "children": [
+        {"kind": "direct"},
+        {"kind": "computed_userset", "relation": "editor"}
+      ]
+    }
+  }
+}

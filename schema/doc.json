@@ -1,0 +1,41 @@
+{
+  "object_type": "doc",
+  "relations": {
+    "owner": {
+      "kind": "direct"
+    },
+    "editor": {
+      "kind": "direct"
+    },
+    "parent": {
+      "kind": "direct"
+    },
+    "viewer": {
+      "kind": "union",
+      "children": [
+        {"kind": "direct"},
+        {"kind": "computed_userset", "relation": "editor"},
+        {
+          "kind": "tuple_to_userset",
+          "tupleset": "parent",
+          "computed_userset": "viewer"
+        }
+      ]
+    },
+    "reviewer": {
+      "kind": "intersection",
+      "children": [
+        {"kind": "direct"},
+        {"kind": "computed_userset", "relation": "editor"}
+      ]
+    },
+    "blocked": {
+      "kind": "direct"
+    },
+    "viewer_not_blocked": {
+      "kind": "exclusion",
+      "base": {"kind": "computed_userset", "relation": "viewer"},
+      "subtract": {"kind": "computed_userset", "relation": "blocked"}
+    }
+  }
+}

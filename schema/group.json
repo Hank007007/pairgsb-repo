@@ -1,0 +1,15 @@
+{
+  "object_type": "group",
+  "relations": {
+    "member": {
+      "kind": "direct"
+    },
+    "admin": {
+      "kind": "union",
+      "children": [
+        {"kind": "direct"},
+        {"kind": "computed_userset", "relation": "member"}
+      ]
+    }
+  }
+}

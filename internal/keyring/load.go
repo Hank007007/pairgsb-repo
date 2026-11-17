@@ -58,6 +58,9 @@ func Parse(data []byte) (*Keyring, error) {
 		default:
 			return nil, fmt.Errorf("%w: %q", ErrInvalidStatus, dk.Status)
 		}
+		if len(dk.KEK) != KeySize {
+			return nil, fmt.Errorf("%w: version %d has %d bytes", ErrInvalidKeySize, dk.Version, len(dk.KEK))
+		}
 
 		keys = append(keys, Key{
 			Version:  dk.Version,

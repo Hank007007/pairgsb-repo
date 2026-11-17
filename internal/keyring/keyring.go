@@ -29,6 +29,7 @@ var (
 	ErrInvalidStatus    = errors.New("keyring has an invalid key status")
 	ErrDuplicateVersion = errors.New("keyring has a duplicate key version")
 	ErrInvalidVersion   = errors.New("keyring key version must be positive")
+	ErrInvalidKeySize   = errors.New("keyring key must be exactly 32 bytes")
 )
 
 // Key is a single versioned KEK. Material is the raw key-encryption key.
@@ -161,6 +162,9 @@ func validateKey(k Key) error {
 	case StatusActive, StatusRetired:
 	default:
 		return fmt.Errorf("%w: %q", ErrInvalidStatus, k.Status)
+	}
+	if len(k.Material) != KeySize {
+		return fmt.Errorf("%w: got %d bytes", ErrInvalidKeySize, len(k.Material))
 	}
 	return nil
 }

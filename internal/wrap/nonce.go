@@ -1,14 +1,18 @@
 package wrap
 
 import (
-	"crypto/sha256"
+	"crypto/rand"
+	"fmt"
 )
 
 // nonceSize is the number of bytes in an AES-GCM nonce.
 const nonceSize = 12
 
-// newNonce returns the nonce used to seal a data key for objectID.
-func newNonce(objectID string) ([]byte, error) {
-	sum := sha256.Sum256([]byte(objectID))
-	return sum[:nonceSize], nil
+// newNonce returns a fresh random nonce for sealing a data key.
+func newNonce() ([]byte, error) {
+	nonce := make([]byte, nonceSize)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("generate data key nonce: %w", err)
+	}
+	return nonce, nil
 }

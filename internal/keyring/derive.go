@@ -3,6 +3,7 @@ package keyring
 import (
 	"crypto/hkdf"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 )
@@ -21,7 +22,14 @@ func DeriveKEK(master []byte, version uint32) ([]byte, error) {
 		return nil, ErrInvalidVersion
 	}
 
-	kek, err := hkdf.Key(sha256.New, master, nil, "kek", KeySize)
+	var versionBytes [4]byte
+	binary.BigEndian.PutUint32(versionBytes[:], version)
+
+	saltInput := append([]byte("kekring/kek/salt/v1/"), versionBytes[:]...)
+	salt := sha256.Sum256(saltInput)
+	info := string(append([]byte("kekring/kek/info/v1/"), versionBytes[:]...))
+
+	kek, err := hkdf.Key(sha256.New, master, salt[:], info, KeySize)
 	if err != nil {
 		return nil, fmt.Errorf("derive key version: %w", err)
 	}

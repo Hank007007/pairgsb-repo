@@ -11,7 +11,21 @@ func (r *Keyring) SelectForWrite() (Key, error) {
 	if len(r.keys) == 0 {
 		return Key{}, ErrEmpty
 	}
-	return copyKey(r.keys[0]), nil
+
+	var (
+		best  Key
+		found bool
+	)
+	for _, k := range r.keys {
+		if k.Status == StatusActive && (!found || k.Version > best.Version) {
+			best = k
+			found = true
+		}
+	}
+	if !found {
+		return Key{}, ErrNoWriter
+	}
+	return copyKey(best), nil
 }
 
 // SelectForRead returns the key version identified by version.

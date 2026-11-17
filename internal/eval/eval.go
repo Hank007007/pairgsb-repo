@@ -26,10 +26,16 @@ func Evaluate(table *policy.Table, request policy.Request) (policy.Result, error
 		return policy.Result{}, ErrEmptyArgv
 	}
 
+	var decided policy.Result
+	matched := false
 	for _, entry := range table.Entries {
 		if result, ok := matchEntry(entry, request); ok {
-			return result, nil
+			decided = result
+			matched = true
 		}
+	}
+	if matched {
+		return decided, nil
 	}
 
 	return policy.Result{
@@ -59,13 +65,29 @@ func matchEntry(entry policy.Entry, request policy.Request) (policy.Result, bool
 		return policy.Result{}, false
 	}
 
-	keepEnv := request.KeepEnv
+	if entry.Negated {
+		return policy.Result{
+			Allowed:  false,
+			RuleLine: entry.Line,
+			Reason:   "denied by negated rule",
+		}, true
+	}
+
+	if len(request.KeepEnv) > 0 && !entry.HasTag(policy.TagSetenv) {
+		return policy.Result{
+			Allowed:  false,
+			RuleLine: entry.Line,
+			Reason:   "environment variables not permitted",
+		}, true
+	}
 
 	result := policy.Result{
 		Allowed:  true,
 		RunAs:    runAs,
-		KeepEnv:  keepEnv,
 		RuleLine: entry.Line,
+	}
+	if entry.HasTag(policy.TagSetenv) {
+		result.KeepEnv = append([]string(nil), request.KeepEnv...)
 	}
 	if !entry.HasTag(policy.TagNoPasswd) {
 		result.NeedPassword = true

@@ -3,7 +3,10 @@
 // matching.
 package match
 
-import "path/filepath"
+import (
+	"os"
+	"path/filepath"
+)
 
 // Command reports whether the executable path given by argv0 is the command
 // named by pattern.
@@ -11,5 +14,25 @@ func Command(pattern, argv0 string) bool {
 	if pattern == "" || argv0 == "" {
 		return false
 	}
-	return filepath.Base(pattern) == filepath.Base(argv0)
+
+	if normalizePath(pattern) == normalizePath(argv0) {
+		return true
+	}
+
+	patternInfo, patternErr := os.Stat(pattern)
+	argv0Info, argv0Err := os.Stat(argv0)
+	if patternErr == nil && argv0Err == nil {
+		return os.SameFile(patternInfo, argv0Info)
+	}
+	return false
+}
+
+// normalizePath returns an absolute, lexically cleaned path so that different
+// spellings of the same location compare equal.
+func normalizePath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return abs
 }

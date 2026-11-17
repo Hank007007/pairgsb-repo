@@ -45,9 +45,10 @@ func parseEntry(line string, lineNo int) (*policy.Entry, error) {
 		return nil, nil
 	}
 
+	negated := false
 	if strings.HasPrefix(text, "!") {
-		// Negation resolved in link.
-		return nil, nil
+		negated = true
+		text = strings.TrimSpace(text[1:])
 	}
 
 	eq := strings.Index(text, "=")
@@ -99,6 +100,7 @@ func parseEntry(line string, lineNo int) (*policy.Entry, error) {
 
 	entry := &policy.Entry{
 		Line:    lineNo,
+		Negated: negated,
 		Users:   users,
 		Hosts:   hosts,
 		Runas:   runas,

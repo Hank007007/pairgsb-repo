@@ -37,7 +37,7 @@ function createApp(options = {}) {
   const rules = options.rules || loadRules(options.routesFile);
 
   return compose(
-    [authenticate, createAuthorize(rules), createDispatch()],
+    [authenticate, createDispatch(), createAuthorize(rules)],
     dispatchToHandler,
   );
 }

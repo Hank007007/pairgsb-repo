@@ -13,8 +13,20 @@ function compilePattern(pattern) {
   if (typeof pattern !== 'string' || pattern.length === 0 || pattern[0] !== '/') {
     throw new TypeError('route pattern must be an absolute path');
   }
-  const source = '^' + escapeRegExp(pattern).replace(/\*/g, '.*') + '$';
+  const source = '^' + pattern.split('*').map(escapeRegExp).join('[^/]+') + '$';
   return new RegExp(source);
+}
+
+function literalPrefixLength(pattern) {
+  const wildcard = pattern.indexOf('*');
+  return wildcard === -1 ? pattern.length : wildcard;
+}
+
+function literalSegmentCount(pattern) {
+  return pattern
+    .split('/')
+    .filter((segment) => segment.length > 0 && !segment.includes('*'))
+    .length;
 }
 
 function normalizeRule(entry, index) {
@@ -37,6 +49,8 @@ function normalizeRule(entry, index) {
     scopes: Object.freeze(scopes),
     tenants: tenants === null ? null : Object.freeze(tenants),
     matcher: compilePattern(entry.pattern),
+    literalPrefixLength: literalPrefixLength(entry.pattern),
+    literalSegmentCount: literalSegmentCount(entry.pattern),
   });
 }
 
@@ -61,6 +75,8 @@ function ruleAppliesToTenant(rule, tenant) {
 
 function selectRule(rules, session, method, pathname) {
   const tenant = session && typeof session.tenant === 'string' ? session.tenant : '';
+  let selected = null;
+
   for (const rule of rules) {
     if (!ruleAppliesToTenant(rule, tenant)) {
       continue;
@@ -71,9 +87,20 @@ function selectRule(rules, session, method, pathname) {
     if (!rule.matcher.test(pathname)) {
       continue;
     }
-    return rule;
+
+    if (
+      selected === null
+      || rule.literalPrefixLength > selected.literalPrefixLength
+      || (
+        rule.literalPrefixLength === selected.literalPrefixLength
+        && rule.literalSegmentCount > selected.literalSegmentCount
+      )
+    ) {
+      selected = rule;
+    }
   }
-  return null;
+
+  return selected;
 }
 
 function missingScopes(rule, session) {

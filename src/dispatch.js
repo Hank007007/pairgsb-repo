@@ -2,8 +2,6 @@
 
 const OVERRIDE_HEADER = 'x-http-method-override';
 
-const OVERRIDABLE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-
 /**
  * Applies the client-supplied method override to the request so downstream
  * routing sees the effective method. Returns the method that was applied, or
@@ -16,7 +14,7 @@ function applyMethodOverride(req) {
   }
 
   const method = header.trim().toUpperCase();
-  if (!OVERRIDABLE_METHODS.has(method)) {
+  if (method.length === 0) {
     return null;
   }
 

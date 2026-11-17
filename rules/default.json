@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "aws-secret-access-key",
+      "description": "AWS secret access key assignment",
+      "pattern": "(?i)AWS_SECRET_ACCESS_KEY\\s*[:=]\\s*[\"']?([A-Za-z0-9/+=_-]{40})[\"']?",
+      "group": 1,
+      "entropy": true
+    },
+    {
+      "id": "aws-access-key-id",
+      "description": "AWS access key identifier",
+      "pattern": "\\b(AKIA[0-9A-Z]{16})\\b",
+      "group": 1
+    },
+    {
+      "id": "private-key-block",
+      "description": "PEM private key header",
+      "pattern": "(-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----)",
+      "group": 1
+    },
+    {
+      "id": "github-token",
+      "description": "GitHub personal access token",
+      "pattern": "\\b(gh[pousr]_[A-Za-z0-9]{36,255})\\b",
+      "group": 1
+    },
+    {
+      "id": "slack-token",
+      "description": "Slack API token",
+      "pattern": "\\b(xox[baprs]-[A-Za-z0-9-]{10,250})\\b",
+      "group": 1
+    },
+    {
+      "id": "jwt",
+      "description": "JSON Web Token",
+      "pattern": "\\b(eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,})\\b",
+      "group": 1
+    },
+    {
+      "id": "generic-credential",
+      "description": "Quoted value assigned to a credential-like name",
+      "pattern": "(?i)(?:secret|token|api[_-]?key|access[_-]?key|password|passwd|private[_-]?key)\\s*[:=]\\s*[\"']([^\"'\\s]{8,})[\"']",
+      "group": 1,
+      "entropy": true
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+# 允许列表：命中这些路径的文件不参与扫描。
+# 每行一个模式，使用 / 分隔，相对扫描根目录。
+# `*` 匹配一个路径段。
+
+vendor/*
+docs/examples/*.md
+tests/fixtures/known_safe/*

@@ -1,9 +1,10 @@
 'use strict';
 
-const { createHmac } = require('node:crypto');
+const { createHmac, timingSafeEqual } = require('node:crypto');
 
 const codec = require('./codec');
 const { resolveKey } = require('./key');
+const { MAX_BYTES } = require('./limits');
 const { EnvelopeFormatError, EnvelopeSignatureError } = require('./errors');
 
 const ALGORITHM = 'sha256';
@@ -37,15 +38,70 @@ function mac(payloadBytes, key) {
 }
 
 /**
- * Check the MAC supplied with an envelope against the session it carries.
+ * Compare two byte strings without exiting early at the first difference.
+ */
+function constantTimeEqual(left, right) {
+  const length = Math.max(left.length, right.length);
+  const paddedLeft = Buffer.alloc(length);
+  const paddedRight = Buffer.alloc(length);
+  left.copy(paddedLeft);
+  right.copy(paddedRight);
+
+  let equal;
+  try {
+    equal = timingSafeEqual(paddedLeft, paddedRight);
+  } catch {
+    equal = false;
+  }
+  return equal && left.length === right.length;
+}
+
+function asPayloadBytes(payload) {
+  if (typeof payload === 'string') {
+    return Buffer.from(payload, 'utf8');
+  }
+  if (Buffer.isBuffer(payload)) {
+    return payload;
+  }
+  if (ArrayBuffer.isView(payload)) {
+    return Buffer.from(payload.buffer, payload.byteOffset, payload.byteLength);
+  }
+  if (payload instanceof ArrayBuffer) {
+    return Buffer.from(payload);
+  }
+  return codec.encodePayload(payload);
+}
+
+function asSignatureBytes(signature) {
+  if (typeof signature === 'string') {
+    try {
+      return codec.b64urlDecode(signature);
+    } catch {
+      throw new EnvelopeSignatureError('envelope signature is unusable');
+    }
+  }
+  if (Buffer.isBuffer(signature)) {
+    return signature;
+  }
+  if (ArrayBuffer.isView(signature)) {
+    return Buffer.from(signature.buffer, signature.byteOffset, signature.byteLength);
+  }
+  if (signature instanceof ArrayBuffer) {
+    return Buffer.from(signature);
+  }
+  throw new EnvelopeSignatureError('envelope signature is unusable');
+}
+
+/**
+ * Check the MAC supplied with an envelope against the payload bytes.
  *
- * @param {Record<string, unknown>} session
+ * @param {Buffer|Uint8Array|ArrayBuffer|string|Record<string, unknown>} payload
  * @param {Buffer} signature
  * @param {Buffer} key
  */
-function verify(session, signature, key) {
-  const expected = mac(codec.encodePayload(session), key);
-  if (signature.toString('base64url') === expected.toString('base64url')) {
+function verify(payload, signature, key) {
+  const expected = mac(asPayloadBytes(payload), key);
+  if (constantTimeEqual(expected, asSignatureBytes(signature))) {
     return;
   }
   throw new EnvelopeSignatureError('envelope signature does not match');
@@ -74,12 +130,18 @@ function seal(session, options = {}) {
  */
 function open(token, options = {}) {
   const key = resolveKey(options.key);
+  if (typeof token !== 'string') {
+    throw new EnvelopeFormatError('envelope must be a string');
+  }
+  if (Buffer.byteLength(token, 'utf8') > MAX_BYTES) {
+    throw new EnvelopeFormatError(`envelope exceeds ${MAX_BYTES} bytes`);
+  }
+
   const segments = splitEnvelope(token);
-  const payloadBytes = codec.b64urlDecode(segments.payload);
-  const session = codec.decodePayload(payloadBytes);
   const signature = codec.b64urlDecode(segments.mac);
-  verify(session, signature, key);
-  return session;
+  const payloadBytes = codec.b64urlDecode(segments.payload);
+  verify(payloadBytes, signature, key);
+  return codec.decodePayload(payloadBytes);
 }
 
 module.exports = {

@@ -143,10 +143,14 @@ section('5. payload bytes that are not valid UTF-8');
     `${codec.b64urlEncode(broken)}.${codec.b64urlEncode(signedOverBrokenBytes)}`
   );
 
-  const reconstructed = codec.decodePayload(broken);
   console.log('  reconstructing the same bytes directly:');
-  console.log(`    profile.displayName: ${JSON.stringify(reconstructed.profile.displayName)}`);
-  console.log(`    contains a replacement character: ${reconstructed.profile.displayName.includes('�')}`);
+  try {
+    const reconstructed = codec.decodePayload(broken);
+    console.log(`    profile.displayName: ${JSON.stringify(reconstructed.profile.displayName)}`);
+    console.log(`    contains a replacement character: ${reconstructed.profile.displayName.includes('�')}`);
+  } catch (error) {
+    console.log(`    rejected -> ${describe(error)}`);
+  }
 }
 
 section('6. declared size limits');

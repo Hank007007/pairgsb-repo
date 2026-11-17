@@ -18,17 +18,22 @@ function resolveKey(key) {
       `no envelope key available: pass a key or set ${KEY_ENV}`
     );
   }
-  if (Buffer.isBuffer(value)) {
-    if (value.length === 0) {
+  if (Buffer.isBuffer(value) || ArrayBuffer.isView(value)) {
+    const buffer = Buffer.isBuffer(value)
+      ? value
+      : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+    if (buffer.length === 0) {
       throw new EnvelopeConfigError('envelope key must not be empty');
     }
-    return value;
+    return buffer;
   }
-  const text = String(value);
-  if (text.length === 0) {
+  if (typeof value !== 'string') {
+    throw new EnvelopeConfigError('envelope key must be a string or Buffer');
+  }
+  if (value.length === 0) {
     throw new EnvelopeConfigError('envelope key must not be empty');
   }
-  return Buffer.from(text, 'utf8');
+  return Buffer.from(value, 'utf8');
 }
 
 module.exports = {

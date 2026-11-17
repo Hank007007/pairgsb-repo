@@ -40,12 +40,15 @@ class FilterReader {
 
   parseAll() {
     this.skipSpaces();
-    const filters = [];
-    while (!this.done) {
-      filters.push(this.parseFilter());
-      this.skipSpaces();
+    if (this.done) {
+      throw protocolError('empty filter', { position: 0 });
     }
-    return filters;
+    const filter = this.parseFilter();
+    this.skipSpaces();
+    if (!this.done) {
+      throw protocolError(`unexpected input at position ${this.index}`, { position: this.index });
+    }
+    return [filter];
   }
 
   parseFilter() {
@@ -88,7 +91,10 @@ class FilterReader {
     const attributeEnd = operator === '=' ? this.index : marker;
     const attribute = this.text.slice(start, attributeEnd);
     if (!ATTRIBUTE_TYPE.test(attribute)) {
-      throw protocolError(`invalid attribute type "${attribute}"`, { attribute });
+      throw protocolError(`invalid attribute type "${attribute}" at position ${start}`, {
+        attribute,
+        position: start,
+      });
     }
     this.index += 1;
     const value = this.readValue();
@@ -117,7 +123,10 @@ class FilterReader {
         buffer = '';
         continue;
       }
-      if (ch.charCodeAt(0) < 0x20) {
+      if (ch === '(') {
+        throw protocolError('unescaped "(" in filter value', { position: this.index - 1 });
+      }
+      if (ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f) {
         throw protocolError('unescaped control character in filter value', {
           position: this.index - 1,
         });
@@ -125,7 +134,7 @@ class FilterReader {
       buffer += ch;
     }
     if (this.done) {
-      throw protocolError('unterminated filter value');
+      throw protocolError('unterminated filter value', { position: this.index });
     }
     segments.push({ literal: buffer, wildcardAfter: false });
     return { segments, wildcardCount };
@@ -158,11 +167,11 @@ class FilterReader {
 export function parseFilter(input) {
   const text = String(input ?? '');
   if (text.trim() === '') {
-    throw protocolError('empty filter');
+    throw protocolError('empty filter', { position: 0 });
   }
   const filters = new FilterReader(text).parseAll();
   if (filters.length === 0) {
-    throw protocolError('empty filter');
+    throw protocolError('empty filter', { position: 0 });
   }
   if (filters.length === 1) return filters[0];
   return { type: 'and', children: filters };

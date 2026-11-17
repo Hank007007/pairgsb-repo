@@ -3,7 +3,7 @@ export class LdapError extends Error {
     super(message);
     this.name = 'LdapError';
     this.code = code;
-    this.details = details;
+    this.details = Object.freeze({ ...details });
   }
 }
 

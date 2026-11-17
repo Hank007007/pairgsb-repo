@@ -51,6 +51,12 @@ function unescapeValue(raw) {
     if (RESERVED.has(ch)) {
       throw invalidDn(`unescaped "${ch}" in DN value`, { value: raw, character: ch });
     }
+    if (ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f) {
+      throw invalidDn('unescaped control character in DN value', {
+        value: raw,
+        position: i,
+      });
+    }
     result += ch;
     escapedFlags.push(false);
   }

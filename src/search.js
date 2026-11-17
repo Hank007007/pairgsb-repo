@@ -1,10 +1,54 @@
 import { config as defaultConfig } from './config.js';
 import { buildServiceDN } from './dn.js';
 import { buildEqualityFilter } from './filter.js';
-import { protocolError } from './ldap/errors.js';
+import { isDescendantDN, parseDN } from './ldap/dn-parser.js';
+import { ErrorCodes, LdapError, protocolError } from './ldap/errors.js';
+
+const VALID_SCOPES = new Set(['base', 'one', 'sub']);
 
 function resolveSettings(options, config) {
   return options.settings ?? config.search;
+}
+
+export function validateSearchBase(base, config = defaultConfig) {
+  if (typeof base !== 'string') {
+    throw new LdapError('search base must be a DN string', ErrorCodes.INVALID_DN_SYNTAX, {
+      baseType: typeof base,
+    });
+  }
+  parseDN(base);
+  const suffixes = Array.isArray(config.suffixes) ? config.suffixes : [];
+  const allowed = suffixes.some((suffix) => {
+    try {
+      return isDescendantDN(base, suffix);
+    } catch {
+      return false;
+    }
+  });
+  if (!allowed) {
+    throw new LdapError('search base is not permitted', ErrorCodes.NO_SUCH_OBJECT);
+  }
+  return base;
+}
+
+export function validateSearchScope(scope) {
+  if (!VALID_SCOPES.has(scope)) {
+    throw protocolError('invalid search scope', { scope: String(scope) });
+  }
+  return scope;
+}
+
+export function validateSearchCount(value, name) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw protocolError(`${name} must be a non-negative integer`, { [name]: value });
+  }
+  return value;
+}
+
+function normalizeCount(value, fallback, name) {
+  const resolved = value ?? fallback ?? 0;
+  validateSearchCount(resolved, name);
+  return resolved;
 }
 
 export function normalizeOptions(options = {}, config = defaultConfig) {
@@ -12,8 +56,10 @@ export function normalizeOptions(options = {}, config = defaultConfig) {
   const base = options.base ?? settings.base;
   const scope = options.scope ?? settings.scope ?? 'sub';
   const attributes = options.attributes ?? settings.attributes;
-  const pageSize = options.pageSize ?? settings.pageSize ?? 0;
-  const sizeLimit = options.sizeLimit ?? settings.sizeLimit ?? 0;
+  const pageSize = normalizeCount(options.pageSize, settings.pageSize, 'pageSize');
+  const sizeLimit = normalizeCount(options.sizeLimit, settings.sizeLimit, 'sizeLimit');
+  validateSearchBase(base, config);
+  validateSearchScope(scope);
   return {
     base,
     scope,

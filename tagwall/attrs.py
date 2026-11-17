@@ -1,7 +1,7 @@
 """Attribute filtering for tagwall."""
 
 from .css import safe_style
-from .model import BLOCKED_ATTR_PREFIXES, BLOCKED_ATTRS, URL_ATTRS
+from .model import ALLOWED_ATTRS, BLOCKED_ATTR_PREFIXES, BLOCKED_ATTRS, URL_ATTRS
 from .urls import safe_scheme
 
 
@@ -21,18 +21,20 @@ def allowed_attrs(attrs, decode):
         name = name.lower()
         if name in seen:
             continue
+        seen.add(name)
+        if name not in ALLOWED_ATTRS:
+            continue
         if name in BLOCKED_ATTRS:
             continue
         if any(name.startswith(prefix) for prefix in BLOCKED_ATTR_PREFIXES):
             continue
         decoded = decode(value) if value is not None else None
         if name in URL_ATTRS:
-            if not safe_scheme(value):
+            if not safe_scheme(decoded):
                 continue
         elif name == "style":
             decoded = safe_style(decoded)
             if not decoded:
                 continue
-        seen.add(name)
         kept.append((name, decoded))
     return kept

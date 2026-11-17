@@ -1,6 +1,30 @@
 """Inline style filtering for tagwall."""
 
+import re
+
 from .model import STYLE_PROPERTIES
+
+_UNSAFE_VALUE = re.compile(r"url\s*\(|expression\s*\(|-moz-binding", re.IGNORECASE)
+_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+_ESCAPE = re.compile(
+    r"\\(?:([0-9A-Fa-f]{1,6})(?:\r\n|[ \t\r\n\f])?|(.))", re.DOTALL
+)
+
+
+def _css_probe(value):
+    """Return *value* with comments and CSS escapes resolved for inspection."""
+    value = _COMMENT.sub("", value)
+
+    def replace(match):
+        hex_digits = match.group(1)
+        if hex_digits is None:
+            return match.group(2)
+        codepoint = int(hex_digits, 16)
+        if codepoint == 0 or codepoint > 0x10FFFF:
+            return "\ufffd"
+        return chr(codepoint)
+
+    return _ESCAPE.sub(replace, value)
 
 
 def safe_style(value):
@@ -21,11 +45,9 @@ def safe_style(value):
         val = val.strip()
         if not prop or not val:
             continue
-        if prop not in STYLE_PROPERTIES and not prop.startswith("-"):
-            # Properties carrying a vendor prefix are treated as compatible
-            # extensions and pass through.
+        if prop not in STYLE_PROPERTIES:
             continue
-        if "expression(" in val.lower():
+        if "-moz-binding" in prop or _UNSAFE_VALUE.search(_css_probe(val)):
             continue
         kept.append("%s: %s" % (prop, val))
     return "; ".join(kept)

@@ -12,7 +12,7 @@ from html import escape, unescape
 from .attrs import allowed_attrs
 from .model import ALLOWED_TAGS, DROP_CONTENT_TAGS, VOID_TAGS
 
-_TAG_NAME = re.compile(r"[A-Za-z][^\s/>]*")
+_TAG_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]*")
 _ATTR = re.compile(
     r"""\s*([^\s"'<>/=]+)"""
     r"""(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?"""
@@ -67,16 +67,19 @@ class _Scanner:
         self.out.append(escape(unescape(text), quote=False))
 
     def _comment(self, start):
+        # ``<!-->`` and ``<!--->`` are empty comments that end at ``>``.
+        # Anything after them is scanned normally rather than copied through.
+        if self.source.startswith("<!-->", start):
+            self.pos = start + 5
+            return
+        if self.source.startswith("<!--->", start):
+            self.pos = start + 6
+            return
         end = self.source.find("-->", start + 4)
         if end >= 0:
             self.pos = end + 3
             return
-        # No ``-->`` terminator: ``<!-->`` stands on its own as a comment and
-        # the remainder of the fragment is carried over.
-        if self.source.startswith("<!-->", start):
-            self.pos = start + 5
-            self._remainder()
-            return
+        # No ``-->`` terminator: the comment runs to the end of the fragment.
         self.pos = self.length
 
     def _cdata(self, start):
@@ -84,8 +87,24 @@ class _Scanner:
         self.pos = self.length if end < 0 else end + 3
 
     def _declaration(self, start):
-        gt = self.source.find(">", start + 2)
-        self.pos = self.length if gt < 0 else gt + 1
+        if self.source.startswith("<?", start):
+            end = self.source.find("?>", start + 2)
+            self.pos = self.length if end < 0 else end + 2
+            return
+        quote = None
+        index = start + 2
+        while index < self.length:
+            char = self.source[index]
+            if quote is not None:
+                if char == quote:
+                    quote = None
+            elif char in ("'", '"'):
+                quote = char
+            elif char == ">":
+                self.pos = index + 1
+                return
+            index += 1
+        self.pos = self.length
 
     def _start_tag(self, start):
         match = _TAG_NAME.match(self.source, start + 1)
@@ -101,10 +120,12 @@ class _Scanner:
             return
         if name in ALLOWED_TAGS:
             self.out.append(self._render_start(name, attrs))
-            if self.source[after - 2:after] == "/>" or name in VOID_TAGS:
+            if name in VOID_TAGS:
                 return
             self.stack.append((name, True))
-        elif self.source[after - 2:after] != "/>":
+        elif name not in VOID_TAGS:
+            # A self-closing slash does not turn a non-void element into a
+            # void one; the element remains open.
             self.stack.append((name, False))
 
     def _end_tag(self, start):
@@ -124,8 +145,8 @@ class _Scanner:
                 continue
             self._close_to(index)
             return
-        self.stack.clear()
-        self._remainder()
+        # An end tag that matches nothing is discarded, and scanning
+        # continues with the following content.
 
     # -- helpers --------------------------------------------------------
 
@@ -163,9 +184,31 @@ class _Scanner:
         return attrs, self.length
 
     def _skip_element(self, name, start):
-        pattern = re.compile(r"</\s*" + re.escape(name) + r"\s*>", re.IGNORECASE)
-        match = pattern.search(self.source, start)
-        self.pos = match.end() if match else self.length
+        index = start
+        while True:
+            lt = self.source.find("</", index)
+            if lt < 0:
+                self.pos = self.length
+                return
+            match = _TAG_NAME.match(self.source, lt + 2)
+            if match is None or match.group(0).lower() != name:
+                index = lt + 2
+                continue
+            quote = None
+            end = match.end()
+            while end < self.length:
+                char = self.source[end]
+                if quote is not None:
+                    if char == quote:
+                        quote = None
+                elif char in ("'", '"'):
+                    quote = char
+                elif char == ">":
+                    self.pos = end + 1
+                    return
+                end += 1
+            self.pos = self.length
+            return
 
     def _render_start(self, name, attrs):
         pieces = ["<", name]

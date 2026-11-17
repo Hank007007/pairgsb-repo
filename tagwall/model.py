@@ -64,10 +64,53 @@ URL_ATTRS = frozenset(
     {
         "background",
         "cite",
+        "formaction",
         "href",
         "longdesc",
         "poster",
         "src",
+        "xlink:href",
+    }
+)
+
+# Attribute names that may be written.  This is deliberately an allow-list:
+# anything not named here is discarded even when it is not otherwise
+# dangerous.
+ALLOWED_ATTRS = frozenset(
+    {
+        "abbr",
+        "align",
+        "alt",
+        "background",
+        "border",
+        "cellpadding",
+        "cellspacing",
+        "checked",
+        "cite",
+        "class",
+        "colspan",
+        "dir",
+        "disabled",
+        "headers",
+        "height",
+        "href",
+        "lang",
+        "longdesc",
+        "poster",
+        "rel",
+        "reversed",
+        "rowspan",
+        "scope",
+        "src",
+        "start",
+        "style",
+        "summary",
+        "target",
+        "title",
+        "type",
+        "valign",
+        "value",
+        "width",
     }
 )
 
@@ -79,14 +122,18 @@ BLOCKED_ATTRS = frozenset(
         "contenteditable",
         "data",
         "dynsrc",
+        "formaction",
         "lowsrc",
         "ping",
+        "srcdoc",
         "srcset",
+        "xlink:href",
+        "xmlns",
     }
 )
 
 # Attribute names that are never written, matched by prefix.
-BLOCKED_ATTR_PREFIXES = ("on",)
+BLOCKED_ATTR_PREFIXES = ("on", "xlink:", "xmlns:")
 
 # Style declarations may only use these properties.
 STYLE_PROPERTIES = frozenset(

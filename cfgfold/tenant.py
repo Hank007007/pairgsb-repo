@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .defaults import DEFAULTS
-from .loader import enforce_size_limit, load_document, looks_like_json
+from .loader import load_document
 from .merge import deep_merge
 
 
@@ -14,10 +14,5 @@ def load_tenant_config(text: str) -> dict:
     default, or JSON when the document opens with ``{``.  The result is the
     platform defaults with the tenant overlay applied.
     """
-    enforce_size_limit(text)
-
-    if looks_like_json(text):
-        return deep_merge(DEFAULTS, text)
-
     overlay = load_document(text)
     return deep_merge(DEFAULTS, overlay)

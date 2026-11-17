@@ -87,6 +87,8 @@ class TupleStore:
             if item in self._tuples:
                 self._tuples.discard(item)
                 removed += 1
+        if removed:
+            self._advance()
         self._persist()
         return removed
 

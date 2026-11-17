@@ -2,9 +2,39 @@
 
 from __future__ import annotations
 
+import types
+
 from .errors import TemplateError, TemplateSecurityError
 
-_BLOCKED_NAMES = ("__class__", "__globals__")
+# Python runtime objects that templates must never get hold of (§2.2).
+_RUNTIME_TYPES = (
+    types.ModuleType,
+    types.FunctionType,
+    types.BuiltinFunctionType,
+    types.MethodType,
+    types.FrameType,
+    types.CodeType,
+    types.TracebackType,
+    type,
+)
+
+
+def check_attribute_name(name: object) -> None:
+    """Reject attribute names that fall outside the sandbox rules (§2.1)."""
+
+    if not isinstance(name, str):
+        raise TemplateError(f"attribute name must be a string, got {type(name).__name__}")
+    if name.startswith("_"):
+        raise TemplateSecurityError(f"access to attribute {name!r} is not allowed")
+
+
+def check_runtime_object(value: object, name: str) -> None:
+    """Reject Python runtime objects obtained through attribute access (§2.2)."""
+
+    if isinstance(value, _RUNTIME_TYPES):
+        raise TemplateSecurityError(
+            f"attribute {name!r} exposes a Python runtime object, which is not allowed"
+        )
 
 
 def wrap(value: object) -> object:
@@ -24,8 +54,7 @@ class SafeContext:
         object.__setattr__(self, "_values", dict(values or {}))
 
     def __getattr__(self, name: str) -> object:
-        if name in _BLOCKED_NAMES:
-            raise TemplateSecurityError(f"access to {name!r} is not allowed")
+        check_attribute_name(name)
         return self.lookup(name)
 
     def lookup(self, name: str) -> object:
@@ -61,6 +90,7 @@ def resolve_name(scope: SafeContext | dict, name: str) -> object:
 def resolve_attr(obj: object, name: str) -> object:
     """Resolve dotted attribute access inside a template expression."""
 
+    check_attribute_name(name)
     if isinstance(obj, dict):
         if name in obj:
             return wrap(obj[name])
@@ -68,6 +98,8 @@ def resolve_attr(obj: object, name: str) -> object:
     if isinstance(obj, SafeContext):
         return getattr(obj, name)
     try:
-        return getattr(obj, name)
+        value = getattr(obj, name)
     except AttributeError as exc:
         raise TemplateError(f"attribute {name!r} is not defined") from exc
+    check_runtime_object(value, name)
+    return wrap(value)

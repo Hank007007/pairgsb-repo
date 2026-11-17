@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from .errors import TemplateError
-from .escape import Markup
+from .escape import Markup, trusted
+from .sandbox import check_attribute_name, check_runtime_object
 
 
 def upper(value: object) -> str:
@@ -21,8 +22,8 @@ def trim(value: object) -> str:
 def length(value: object) -> int:
     try:
         return len(value)  # type: ignore[arg-type]
-    except TypeError:
-        return 0
+    except TypeError as exc:
+        raise TemplateError(f"length filter requires a sized value: {exc}") from exc
 
 
 def default(value: object, fallback: object = "") -> object:
@@ -36,11 +37,17 @@ def join(value: object, separator: str = ", ") -> str:
 
 
 def attr_filter(value: object, name: str) -> object:
-    return getattr(value, name)
+    check_attribute_name(name)
+    try:
+        result = getattr(value, name)
+    except AttributeError as exc:
+        raise TemplateError(f"attribute {name!r} is not defined") from exc
+    check_runtime_object(result, name)
+    return result
 
 
 def safe_filter(value: object) -> Markup:
-    return Markup(value)
+    return trusted(value)
 
 
 FILTERS = {
@@ -63,5 +70,7 @@ def apply_filter(name: str, value: object, args: list | tuple = ()) -> object:
         raise TemplateError(f"unknown filter: {name}")
     try:
         return func(value, *args)
-    except AttributeError as exc:
+    except TemplateError:
+        raise
+    except Exception as exc:
         raise TemplateError(f"filter {name!r} failed: {exc}") from exc

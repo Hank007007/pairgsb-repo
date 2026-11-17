@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import time
 
-from .errors import TemplateError
+from .errors import TemplateError, TemplateLimitError
 from .escape import escape
 from .filters import apply_filter
 from .limits import DEFAULT_LIMITS, Limits
 from .loader import TemplateLoader
 from .parser import Template
-from .sandbox import SafeContext, resolve_attr, wrap
+from .sandbox import SafeContext, check_attribute_name, resolve_attr, wrap
 
 _GLOBALS = {
     "range": range,
@@ -25,6 +25,30 @@ class Renderer:
         self.loader = loader
         self.limits = limits or DEFAULT_LIMITS
         self.deadline = time.monotonic() + self.limits.max_render_seconds
+        self.loop_iterations = 0
+        self.output_bytes = 0
+
+    # -- limit enforcement -------------------------------------------------
+    def _check_deadline(self) -> None:
+        if time.monotonic() > self.deadline:
+            raise TemplateLimitError(
+                f"render exceeded the time limit of {self.limits.max_render_seconds} seconds"
+            )
+
+    def _count_iteration(self) -> None:
+        self.loop_iterations += 1
+        if self.loop_iterations > self.limits.max_loop_iterations:
+            raise TemplateLimitError(
+                f"render exceeded the loop limit of {self.limits.max_loop_iterations} iterations"
+            )
+
+    def _append(self, out: list[str], piece: str) -> None:
+        self.output_bytes += len(piece.encode("utf-8"))
+        if self.output_bytes > self.limits.max_output_bytes:
+            raise TemplateLimitError(
+                f"render exceeded the output limit of {self.limits.max_output_bytes} bytes"
+            )
+        out.append(piece)
 
     # -- entry points ----------------------------------------------------
     def render(self, template: Template, context: dict | SafeContext) -> str:
@@ -58,12 +82,13 @@ class Renderer:
         overrides: dict[str, list],
     ) -> None:
         for node in nodes:
+            self._check_deadline()
             kind = node[0]
             if kind == "text":
-                out.append(node[1])
+                self._append(out, node[1])
             elif kind == "output":
                 value = self.eval_expr(node[1], scope)
-                out.append(escape(value))
+                self._append(out, escape(value))
             elif kind == "for":
                 self.render_for(node, scope, out, overrides)
             elif kind == "if":
@@ -89,6 +114,8 @@ class Renderer:
 
         rendered_any = False
         for item in iterator:
+            self._count_iteration()
+            self._check_deadline()
             rendered_any = True
             inner = dict(scope)
             if len(targets) == 1:
@@ -120,6 +147,7 @@ class Renderer:
             if ignore_missing:
                 return
             raise
+        # The included render already accounted for its own output bytes.
         out.append(self._render_template(included, scope, {}))
 
     # -- expression evaluation ------------------------------------------
@@ -134,6 +162,8 @@ class Renderer:
         if kind == "index":
             target = self.eval_expr(node[1], scope)
             index = self.eval_expr(node[2], scope)
+            if isinstance(index, str):
+                check_attribute_name(index)
             try:
                 return target[index]  # type: ignore[index]
             except (KeyError, IndexError, TypeError) as exc:
@@ -145,6 +175,12 @@ class Renderer:
             args = [self.eval_expr(arg, scope) for arg in node[2]]
             return self.call(func, args)
         if kind == "filter":
+            if node[2] == "safe":
+                inner = node[1]
+                if inner[0] != "lit" or not isinstance(inner[1], str):
+                    raise TemplateError(
+                        "the 'safe' filter may only be applied to string literals"
+                    )
             value = self.eval_expr(node[1], scope)
             args = [self.eval_expr(arg, scope) for arg in node[3]]
             return apply_filter(node[2], value, args)
@@ -227,13 +263,7 @@ def render(
     """
 
     limits = limits or DEFAULT_LIMITS
-    max_loop_iterations = limits.max_loop_iterations
-    max_output_bytes = limits.max_output_bytes
-    max_render_seconds = limits.max_render_seconds
-    deadline = time.monotonic() + max_render_seconds
-
     if loader is None:
         loader = getattr(template, "loader", None)
     renderer = Renderer(loader=loader, limits=limits)
-    renderer.deadline = deadline
     return renderer.render(template, context)

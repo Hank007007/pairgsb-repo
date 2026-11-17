@@ -3,24 +3,42 @@
 from __future__ import annotations
 
 import os
+import re
 
-from .errors import TemplateNotFoundError
+from .errors import TemplateNotFoundError, TemplateSecurityError
 from .parser import Template
+
+_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
 
 class TemplateLoader:
     """Loads templates from a directory on disk."""
 
     def __init__(self, template_dir: str, cache: bool = True) -> None:
-        self.template_dir = os.path.abspath(template_dir)
+        self.template_dir = os.path.realpath(template_dir)
         self.cache = cache
         self._cache: dict[str, Template] = {}
 
     def resolve_template(self, name: str) -> str:
         """Return the filesystem path for the template called ``name``."""
 
-        path = os.path.join(self.template_dir, name)
-        return path
+        if not isinstance(name, str) or not name.strip():
+            raise TemplateSecurityError("template name must be a non-empty relative path")
+        if (
+            os.path.isabs(name)
+            or name.startswith(("/", "\\"))
+            or _DRIVE_RE.match(name)
+        ):
+            raise TemplateSecurityError(
+                f"absolute template path is not allowed: {name!r}"
+            )
+        candidate = os.path.realpath(os.path.join(self.template_dir, name))
+        root = self.template_dir
+        if candidate != root and not candidate.startswith(root + os.sep):
+            raise TemplateSecurityError(
+                f"template name escapes the template root: {name!r}"
+            )
+        return candidate
 
     def read_source(self, name: str) -> str:
         path = self.resolve_template(name)

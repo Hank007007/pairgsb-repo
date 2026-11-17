@@ -1,0 +1,26 @@
+# Build output
+/bin/
+/dist/
+/gqladmit
+/gqladmit.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go tooling and test artifacts
+*.test
+*.out
+*.prof
+coverage.*
+.vendor/
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local scratch files
+.build.prompt.txt

@@ -1,6 +1,6 @@
 import { IssueError } from './issue.js';
 
-export function createRotator({ store, clock, graceMs, issuer }) {
+export function createRotator({ store, clock, graceMs, issuer, cache }) {
   function rotate(id8) {
     const current = store.getById(id8);
     if (!current) {
@@ -24,6 +24,7 @@ export function createRotator({ store, clock, graceMs, issuer }) {
       graceUntil,
       successorId8: issued.id8,
     });
+    cache.delete(id8);
 
     return {
       ...issued,

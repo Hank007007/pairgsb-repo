@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { hashSecret } from './digest.js';
+import { parseKey } from './key-format.js';
 
 function emptyState() {
   return { version: 1, keys: {} };
@@ -51,6 +53,10 @@ export function createStore({ dataFile }) {
     return record ? structuredClone(record) : null;
   }
 
+  function peekById(id8) {
+    return state.keys[id8] ?? null;
+  }
+
   function put(record) {
     state.keys[record.id8] = structuredClone(record);
     save();
@@ -82,16 +88,34 @@ export function createStore({ dataFile }) {
     load();
   }
 
+  function migrateLegacyRecords(pepper) {
+    let changed = false;
+    for (const record of Object.values(state.keys)) {
+      if (typeof record.key !== 'string') continue;
+      if (!record.secretHash) {
+        const parsed = parseKey(record.key);
+        if (parsed && parsed.id8 === record.id8) {
+          record.secretHash = hashSecret(pepper, parsed.secret);
+        }
+      }
+      delete record.key;
+      changed = true;
+    }
+    if (changed) save();
+  }
+
   load();
 
   return {
     dataFile,
     getById,
+    peekById,
     put,
     lookup,
     update,
     all,
     reload,
+    migrateLegacyRecords,
     save,
   };
 }

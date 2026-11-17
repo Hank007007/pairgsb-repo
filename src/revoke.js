@@ -1,4 +1,4 @@
-export function createRevoker({ store, clock }) {
+export function createRevoker({ store, clock, cache }) {
   function revoke(id8) {
     const current = store.getById(id8);
     if (!current) {
@@ -16,6 +16,7 @@ export function createRevoker({ store, clock }) {
 
     const revokedAt = clock.nowIso();
     store.update(id8, { revoked: true, revokedAt });
+    cache.delete(id8);
 
     return {
       found: true,

@@ -13,6 +13,10 @@ export function createCache({ max = 256 } = {}) {
     return snapshot(record);
   }
 
+  function peek(id8) {
+    return entries.has(id8) ? entries.get(id8) : null;
+  }
+
   function set(id8, record) {
     if (entries.has(id8)) entries.delete(id8);
     entries.set(id8, snapshot(record));
@@ -36,6 +40,7 @@ export function createCache({ max = 256 } = {}) {
 
   return {
     get,
+    peek,
     set,
     delete: remove,
     clear,

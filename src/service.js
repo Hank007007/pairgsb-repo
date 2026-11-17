@@ -16,17 +16,25 @@ export function createService(options = {}) {
   const clock = options.clock ?? systemClock;
 
   const store = createStore({ dataFile: config.dataFile });
+  store.migrateLegacyRecords(config.pepper);
   const cache = createCache({ max: config.cacheSize });
 
-  const issuer = createIssuer({ store, clock });
-  const verifier = createVerifier({ store, cache, logger });
+  const issuer = createIssuer({ store, clock, pepper: config.pepper });
+  const verifier = createVerifier({
+    store,
+    cache,
+    logger,
+    pepper: config.pepper,
+    clock,
+  });
   const rotator = createRotator({
     store,
     clock,
     graceMs: config.graceMs,
     issuer,
+    cache,
   });
-  const revoker = createRevoker({ store, clock });
+  const revoker = createRevoker({ store, clock, cache });
 
   return {
     config,

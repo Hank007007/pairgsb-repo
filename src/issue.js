@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { formatKey, isKnownEnvironment } from './key-format.js';
+import { hashSecret } from './digest.js';
 
 export class IssueError extends Error {
   constructor(message, code) {
@@ -9,7 +10,7 @@ export class IssueError extends Error {
   }
 }
 
-export function createIssuer({ store, clock }) {
+export function createIssuer({ store, clock, pepper }) {
   function issue({ ownerId, scopes = [], env = 'prod' }) {
     if (typeof ownerId !== 'string' || ownerId.trim() === '') {
       throw new IssueError('ownerId is required', 'invalid_owner');
@@ -21,7 +22,11 @@ export function createIssuer({ store, clock }) {
       throw new IssueError('scopes must be an array of strings', 'invalid_scopes');
     }
 
-    const id8 = randomBytes(2).toString('hex');
+    const id8 = randomBytes(8).toString('hex');
+    if (store.getById(id8)) {
+      throw new IssueError(`id8 is already in use: ${id8}`, 'id8_collision');
+    }
+
     const secret = randomBytes(32).toString('hex');
     const key = formatKey({ env, id8, secret });
     const now = clock.nowIso();
@@ -31,7 +36,7 @@ export function createIssuer({ store, clock }) {
       env,
       ownerId,
       scopes: [...new Set(scopes)],
-      key,
+      secretHash: hashSecret(pepper, secret),
       createdAt: now,
       rotatedAt: null,
       graceUntil: null,

@@ -53,7 +53,11 @@ export function runDemo({ dataFile }) {
 
   heading('storage file');
   for (const record of service.list()) {
-    show(record.id8, { env: record.env, ownerId: record.ownerId, key: record.key });
+    show(record.id8, {
+      env: record.env,
+      ownerId: record.ownerId,
+      secretHash: record.secretHash,
+    });
   }
 
   heading('collision check');

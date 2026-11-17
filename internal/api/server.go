@@ -70,21 +70,17 @@ func (s *Server) handleFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parsed, err := url.Parse(req.URL)
+	_, err := url.Parse(req.URL)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, fetchResponse{OK: false, Error: ErrBadRequest, Detail: "url is invalid"})
-		return
-	}
-
-	if err := s.Policy.Check(parsed); err != nil {
-		writeJSON(w, http.StatusForbidden, fetchResponse{OK: false, Error: ErrPolicyDenied, Detail: err.Error()})
 		return
 	}
 
 	res, err := s.Fetcher.Get(r.Context(), req.URL)
 	if err != nil {
 		if errors.Is(err, policy.ErrHostDenied) || errors.Is(err, policy.ErrBlockedIP) ||
-			errors.Is(err, policy.ErrScheme) || errors.Is(err, policy.ErrPortDenied) {
+			errors.Is(err, policy.ErrScheme) || errors.Is(err, policy.ErrPortDenied) ||
+			errors.Is(err, policy.ErrNoHost) || errors.Is(err, fetcher.ErrTooManyRedirects) {
 			writeJSON(w, http.StatusForbidden, fetchResponse{OK: false, Error: ErrPolicyDenied, Detail: err.Error()})
 			return
 		}

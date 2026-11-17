@@ -14,6 +14,7 @@ var (
 	ErrBlockedIP  = errors.New("policy: address is not routable")
 	ErrHostDenied = errors.New("policy: host not allowed")
 	ErrPortDenied = errors.New("policy: port not allowed")
+	ErrResolve    = errors.New("policy: cannot resolve host")
 )
 
 // Resolver 把主机名解析成 IP 列表。线上用系统解析，单测里换成固定的表。
@@ -49,27 +50,53 @@ func New(allowed, blocked []string, ports []int, r Resolver) *Policy {
 
 // Check 判断这个 URL 能不能发出去。不通过时返回上面几个哨兵错误之一。
 func (p *Policy) Check(u *url.URL) error {
+	_, err := p.CheckAndResolve(u)
+	return err
+}
+
+// CheckAndResolve 在 Check 的基础上返回本次校验解析出的地址。
+// fetcher 必须用这批地址建连，不能自己再解析一次，否则会留下 DNS rebinding 窗口。
+func (p *Policy) CheckAndResolve(u *url.URL) ([]net.IP, error) {
 	if u == nil {
-		return ErrNoHost
+		return nil, ErrNoHost
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return ErrScheme
+		return nil, ErrScheme
 	}
 	host := u.Hostname()
 	if host == "" {
-		return ErrNoHost
+		return nil, ErrNoHost
 	}
 
 	for _, b := range p.BlockedHosts {
-		if strings.EqualFold(host, strings.TrimSpace(b)) {
-			return ErrHostDenied
+		if hostMatches(host, b) {
+			return nil, ErrHostDenied
 		}
 	}
 
 	if len(p.AllowedHosts) > 0 {
-		return p.checkAllowlist(host)
+		if !p.hostAllowed(host) {
+			return nil, ErrHostDenied
+		}
 	}
-	return p.checkLiteralAddress(host)
+
+	if len(p.AllowedPorts) > 0 && !p.IsPortAllowed(u) {
+		return nil, ErrPortDenied
+	}
+
+	ips, err := p.resolve(host)
+	if err != nil {
+		return nil, ErrResolve
+	}
+	if len(ips) == 0 {
+		return nil, ErrResolve
+	}
+	for _, ip := range ips {
+		if isBlocked(ip) {
+			return nil, ErrBlockedIP
+		}
+	}
+	return ips, nil
 }
 
 // IsPortAllowed 判断端口在不在白名单里。URL 没写端口时按 scheme 取默认值。
@@ -94,51 +121,69 @@ func (p *Policy) IsPortAllowed(u *url.URL) bool {
 	return false
 }
 
-func (p *Policy) checkAllowlist(host string) error {
-	h := strings.ToLower(host)
+func (p *Policy) hostAllowed(host string) bool {
 	for _, a := range p.AllowedHosts {
-		a = strings.ToLower(strings.TrimSpace(a))
-		if a == "" {
-			continue
-		}
-		if strings.HasPrefix(a, "*.") {
-			if strings.HasSuffix(h, a[1:]) {
-				return nil
-			}
-			continue
-		}
-		if strings.HasSuffix(h, a) {
-			return nil
+		if hostMatches(host, a) {
+			return true
 		}
 	}
-	return ErrHostDenied
+	return false
 }
 
-func (p *Policy) checkLiteralAddress(host string) error {
+func (p *Policy) resolve(host string) ([]net.IP, error) {
 	ip := net.ParseIP(host)
-	if ip == nil {
-		return nil
+	if ip != nil {
+		return []net.IP{ip}, nil
 	}
-	if isBlocked(ip) {
-		return ErrBlockedIP
+	r := p.Resolver
+	if r == nil {
+		r = systemResolver{}
 	}
-	return nil
+	return r.LookupIP(host)
+}
+
+// hostMatches 实现规范里的两种写法：example.com 只匹配自身，
+// *.example.com 只匹配子域，不匹配 example.com 本身。
+func hostMatches(host, entry string) bool {
+	h := normalizeHost(host)
+	a := normalizeHost(entry)
+	if h == "" || a == "" {
+		return false
+	}
+	if strings.HasPrefix(a, "*.") {
+		suffix := a[1:]
+		return len(suffix) > 1 && len(h) > len(suffix) && strings.HasSuffix(h, suffix)
+	}
+	return h == a
+}
+
+func normalizeHost(host string) string {
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
 }
 
 func isBlocked(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
 	v4 := ip.To4()
-	if v4 == nil {
+	if v4 != nil {
+		ip = v4
+	}
+	if ip.IsUnspecified() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+		return true
+	}
+	if v4 != nil {
+		switch {
+		case v4[0] == 10:
+			return true
+		case v4[0] == 192 && v4[1] == 168:
+			return true
+		case v4[0] == 172 && v4[1]&0xf0 == 16:
+			return true
+		case v4[0] == 100 && v4[1]&0xc0 == 64:
+			return true
+		}
 		return false
 	}
-	switch {
-	case v4[0] == 127:
-		return true
-	case v4[0] == 10:
-		return true
-	case v4[0] == 192 && v4[1] == 168:
-		return true
-	case v4[0] == 172 && v4[1]&0xf0 == 16:
-		return true
-	}
-	return false
+	return ip.IsPrivate()
 }

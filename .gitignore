@@ -1,0 +1,29 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go workspace and module cache artifacts
+go.work
+go.work.sum
+vendor/
+
+# Coverage and profiling
+coverage.*
+*.cover
+*.prof
+
+# Editor and OS files
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local scratch
+.build.prompt.txt

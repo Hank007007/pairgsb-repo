@@ -75,7 +75,17 @@ func IsSubset(child, parent Scope) bool {
 	if child.Action != parent.Action {
 		return false
 	}
-	return strings.HasPrefix(child.Resource, parent.Resource)
+	parentSegments := strings.Split(parent.Resource, "/")
+	childSegments := strings.Split(child.Resource, "/")
+	if len(childSegments) < len(parentSegments) {
+		return false
+	}
+	for i, segment := range parentSegments {
+		if childSegments[i] != segment {
+			return false
+		}
+	}
+	return true
 }
 
 // IsSetSubset reports whether every scope in child is contained in at

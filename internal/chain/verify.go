@@ -79,13 +79,28 @@ func VerifyChain(links []token.Link, opts Options) error {
 		}
 	}
 
-	leaf := links[len(links)-1]
-	expires, present, err := expiryOf(leaf.Payload)
-	if err != nil {
-		return err
+	// §3: every link after the root must record the MAC of the link
+	// immediately preceding it, so a link issued into another chain
+	// cannot be spliced into this one.
+	for i := 1; i < len(links); i++ {
+		if links[i].Payload.PrevMAC != links[i-1].MAC {
+			return fmt.Errorf("%w: token %q does not follow token %q",
+				ErrBrokenLink, links[i].Payload.TokenID, links[i-1].Payload.TokenID)
+		}
 	}
-	if present && !opts.now().Before(expires) {
-		return fmt.Errorf("%w: token %q", ErrExpired, leaf.Payload.TokenID)
+
+	// §5: the effective caveat set is the union of every link's
+	// caveats, so expiry contributed by an intermediate link still
+	// binds the whole chain.
+	now := opts.now()
+	for _, link := range links {
+		expires, present, err := expiryOf(link.Payload)
+		if err != nil {
+			return err
+		}
+		if present && !now.Before(expires) {
+			return fmt.Errorf("%w: token %q", ErrExpired, link.Payload.TokenID)
+		}
 	}
 
 	if opts.Revoked != nil && opts.Revoked.IsRevoked(links) {

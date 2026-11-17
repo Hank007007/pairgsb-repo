@@ -52,6 +52,12 @@ func (l *List) IsRevoked(links []token.Link) bool {
 	if l == nil || len(links) == 0 {
 		return false
 	}
-	leaf := links[len(links)-1]
-	return l.Has(leaf.Payload.TokenID)
+	// §6: revoking a token id invalidates the link that carries it
+	// and every link derived from it.
+	for _, link := range links {
+		if l.Has(link.Payload.TokenID) {
+			return true
+		}
+	}
+	return false
 }

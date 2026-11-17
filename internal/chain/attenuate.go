@@ -63,11 +63,37 @@ func Narrow(parent token.Link, claim Claim, key mac.Key) (token.Link, error) {
 	if sameScopeSet(childScopes, parentScopes) {
 		return token.Link{}, fmt.Errorf("%w: %v", ErrScopeNotNarrowed, claim.Scopes)
 	}
+	if err := ensureCaveatsInherited(parent.Payload.Caveats, claim.Caveats); err != nil {
+		return token.Link{}, err
+	}
 
 	p := payloadFrom(claim)
 	p.Caveats = append([]token.Caveat(nil), claim.Caveats...)
 	p.PrevMAC = parent.MAC
 	return sign(p, key), nil
+}
+
+// ensureCaveatsInherited enforces §5: a child must carry every caveat of
+// its parent with the same value. It may add caveats of its own.
+func ensureCaveatsInherited(parentCaveats, childCaveats []token.Caveat) error {
+	for _, parentCaveat := range parentCaveats {
+		matched := false
+		for _, childCaveat := range childCaveats {
+			if childCaveat.Name == parentCaveat.Name {
+				if childCaveat.Value != parentCaveat.Value {
+					return fmt.Errorf("%w: caveat %q changed from %q to %q",
+						ErrParentCaveatMissed, parentCaveat.Name, parentCaveat.Value, childCaveat.Value)
+				}
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("%w: caveat %q is absent from the child link",
+				ErrParentCaveatMissed, parentCaveat.Name)
+		}
+	}
+	return nil
 }
 
 func payloadFrom(claim Claim) token.Payload {

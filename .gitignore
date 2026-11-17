@@ -1,0 +1,30 @@
+# Build output
+/bin/
+/dist/
+/kekringd
+/kekringd.exe
+/kekringctl
+/kekringctl.exe
+*.exe
+*.test
+*.out
+
+# Local keyring documents and secrets
+keyring.json
+*.keyring.json
+master.key
+
+# Coverage and profiling
+*.cover
+coverage.out
+*.prof
+
+# Editor and OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local scratch notes and task harness files
+.build.*
+*.local

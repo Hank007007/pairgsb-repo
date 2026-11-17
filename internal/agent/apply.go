@@ -18,13 +18,27 @@ func ApplyBundle(root string, secrets []bundle.Secret) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("agent: create secrets dir: %w", err)
 	}
+	desired := make(map[string]struct{}, len(secrets))
 	for _, sec := range secrets {
 		if err := bundle.ValidateName(sec.Name); err != nil {
 			return err
 		}
+		desired[sec.Name] = struct{}{}
 		path := filepath.Join(dir, sec.Name)
 		if err := writeFileAtomic(path, sec.Value); err != nil {
 			return fmt.Errorf("agent: write %q: %w", sec.Name, err)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("agent: list secrets dir: %w", err)
+	}
+	for _, entry := range entries {
+		if _, ok := desired[entry.Name()]; ok {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+			return fmt.Errorf("agent: remove stale secret %q: %w", entry.Name(), err)
 		}
 	}
 	return nil

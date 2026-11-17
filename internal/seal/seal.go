@@ -4,28 +4,29 @@ package seal
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"encoding/binary"
+	"crypto/rand"
 	"errors"
 	"fmt"
-	"sync"
 )
 
 // NonceSize is the AES-GCM nonce length used by the envelope format.
 const NonceSize = 12
 
-var (
-	mu      sync.Mutex
-	counter uint64
-)
-
 // NextNonce returns a nonce for the next envelope.
 func NextNonce() []byte {
-	mu.Lock()
-	defer mu.Unlock()
-	nonce := make([]byte, NonceSize)
-	binary.BigEndian.PutUint64(nonce[NonceSize-8:], counter)
-	counter++
+	nonce, err := nextNonce()
+	if err != nil {
+		panic(fmt.Sprintf("seal: nonce: %v", err))
+	}
 	return nonce
+}
+
+func nextNonce() ([]byte, error) {
+	nonce := make([]byte, NonceSize)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	return nonce, nil
 }
 
 // Encrypt seals plaintext under key and returns the nonce that was used along
@@ -35,7 +36,10 @@ func Encrypt(key, plaintext []byte) (nonce, ciphertext []byte, err error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	nonce = NextNonce()
+	nonce, err = nextNonce()
+	if err != nil {
+		return nil, nil, err
+	}
 	return nonce, aead.Seal(nil, nonce, plaintext, nil), nil
 }
 

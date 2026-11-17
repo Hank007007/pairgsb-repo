@@ -57,9 +57,20 @@ func VerifyManifest(m *Manifest, pub ed25519.PublicKey) error {
 // AcceptRevision reports whether a bundle carrying incoming may replace the
 // copy currently held at local.
 func AcceptRevision(local, incoming uint64) error {
+	if incoming <= local {
+		return fmt.Errorf("manifest: revision %d is not greater than locally applied revision %d", incoming, local)
+	}
 	return nil
 }
 
 func signingBytes(m *Manifest) ([]byte, error) {
-	return json.Marshal(m.Payload)
+	return json.Marshal(struct {
+		Payload   Payload `json:"payload"`
+		Recipient string  `json:"recipient"`
+		ExpiresAt int64   `json:"expiresAt"`
+	}{
+		Payload:   m.Payload,
+		Recipient: m.Recipient,
+		ExpiresAt: m.ExpiresAt,
+	})
 }

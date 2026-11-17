@@ -1,0 +1,18 @@
+name: ci
+
+jobs:
+  build:
+    steps:
+      - name: checkout
+        run: |
+          printf 'checking out %s\n' "${{ github.ref }}"
+          printf 'repository: %s\n' "${{ github.repository }}"
+
+      - name: run tests
+        run: |
+          printf 'running tests\n'
+
+      - name: report
+        if: ${{ github.event.pull_request.number > 0 }}
+        run: |
+          printf 'pull request %s by %s\n' "${{ github.event.pull_request.number }}" "${{ github.actor }}"

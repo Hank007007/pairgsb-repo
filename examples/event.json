@@ -1,0 +1,27 @@
+{
+  "event_name": "pull_request",
+  "repository": "acme/widgets",
+  "ref": "refs/pull/42/merge",
+  "sha": "a1b2c3d4e5f6",
+  "actor": "octocat",
+  "pull_request": {
+    "number": 42,
+    "title": "Add login form",
+    "body": "Adds a login form and a few tests.",
+    "head": {
+      "ref": "feature/login",
+      "label": "octocat:feature/login",
+      "repo": {
+        "full_name": "octocat/widgets"
+      }
+    },
+    "base": {
+      "ref": "main"
+    },
+    "merged": false
+  },
+  "commits": [
+    { "message": "Add login form" },
+    { "message": "Cover the empty password case" }
+  ]
+}

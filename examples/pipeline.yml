@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_ENV: test
+  BUILD_DIR: artifacts
+
+jobs:
+  build:
+    env:
+      JOB_NAME: build
+    steps:
+      - name: checkout
+        env:
+          CHECKOUT_REF: ${{ github.head_ref }}
+        run: |
+          printf 'checkout %s\n' "$CHECKOUT_REF"
+          printf 'into %s\n' "$PWD"
+
+      - name: test
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          SUITE: unit
+        run: |
+          printf 'installing for %s\n' "$NODE_ENV"
+          printf 'running %s tests\n' "$SUITE"
+          printf 'job %s\n' "$JOB_NAME"
+
+      - name: upload artifacts
+        uses: local:scripts/upload.sh
+        with:
+          ARTIFACT_NAME: widget
+          ARTIFACT_DIR: ${{ env.BUILD_DIR }}

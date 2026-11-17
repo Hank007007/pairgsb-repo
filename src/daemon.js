@@ -30,8 +30,21 @@ export async function serve(session, options = {}) {
 
   const timer = armLeaseRenewal(session, logger);
 
+  let shuttingDown = false;
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    clearTimeout(timer);
+    cleanup(session.dir);
+    logger.info('shutdown complete');
+  };
+
   const onTerminate = () => {
-    process.exit(0);
+    try {
+      shutdown();
+    } finally {
+      process.exit(0);
+    }
   };
   process.once('SIGTERM', onTerminate);
 
@@ -60,9 +73,7 @@ export async function serve(session, options = {}) {
       output.write(`unknown command: ${command}\n`);
     }
   } finally {
-    clearTimeout(timer);
     process.removeListener('SIGTERM', onTerminate);
+    shutdown();
   }
-
-  cleanup(session.dir);
 }

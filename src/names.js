@@ -1,7 +1,5 @@
+const NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
 export function safeName(name) {
-  if (typeof name !== 'string') return false;
-  if (name.length === 0) return false;
-  if (name.includes('/')) return false;
-  if (name.includes('..')) return false;
-  return true;
+  return typeof name === 'string' && NAME_PATTERN.test(name);
 }

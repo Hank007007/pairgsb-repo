@@ -16,10 +16,10 @@ async function main() {
   prepareDirectory(config.secretsDir);
 
   const bundle = await broker.fetchBundle();
-  materialize(config.secretsDir, bundle.secrets);
+  const written = materialize(config.secretsDir, bundle.secrets);
 
   process.stderr.write(
-    `sidemount: mounted ${Object.keys(bundle.secrets).length} secret(s) for ${config.service}\n`,
+    `sidemount: mounted ${written.length} secret(s) for ${config.service}\n`,
   );
 
   const session = {
@@ -27,6 +27,7 @@ async function main() {
     broker,
     leaseId: bundle.leaseId,
     leaseSeconds: bundle.ttlSeconds ?? config.leaseSeconds,
+    mounted: new Set(written),
   };
 
   await serve(session);

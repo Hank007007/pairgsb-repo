@@ -1,0 +1,28 @@
+# Build output
+/bin/
+/dist/
+/filesentryd
+/filesentryctl
+*.exe
+*.test
+*.out
+
+# Coverage and profiles
+coverage.*
+*.coverprofile
+*.prof
+
+# Local scratch space
+.scratch/
+.demo/
+*.sock
+
+# Local build prompt
+/.build.prompt.txt
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

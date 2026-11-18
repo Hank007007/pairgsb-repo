@@ -1,0 +1,29 @@
+{
+  "rules": [
+    {
+      "uid": 1001,
+      "paths": ["/srv/tenants/acme/**"],
+      "ops": ["read", "list", "write", "chown"]
+    },
+    {
+      "uid": 1001,
+      "paths": ["/srv/tenants/acme/private/**"],
+      "ops": ["deny"]
+    },
+    {
+      "uid": 1002,
+      "paths": ["/srv/tenants/beta/**"],
+      "ops": ["read", "list", "write", "chown"]
+    },
+    {
+      "uid": 1003,
+      "paths": ["/srv/tenants/gamma/**"],
+      "ops": ["read", "list"]
+    },
+    {
+      "uid": 0,
+      "paths": ["/srv/**"],
+      "ops": ["read", "list", "write", "chown"]
+    }
+  ]
+}

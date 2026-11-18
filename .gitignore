@@ -1,0 +1,30 @@
+# build output
+/bin/
+/dist/
+/hopfence
+/hopfence.exe
+cmd/hopfence/hopfence
+cmd/hopfence/hopfence.exe
+
+# test and coverage artifacts
+*.test
+*.out
+coverage.*
+/profile.cov
+/profile.html
+
+# editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# local runtime output
+*.log
+/tmp/
+.cache/
+
+# local workspace scratch
+.build.prompt.txt
+/scratch/
+/_verify/

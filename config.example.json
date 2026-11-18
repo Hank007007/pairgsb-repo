@@ -1,0 +1,32 @@
+{
+  "listen": "127.0.0.1:8080",
+  "access_log": "",
+  "timeout_seconds": 15,
+  "routes": [
+    {
+      "name": "static",
+      "prefix": "/static",
+      "upstream": "http://127.0.0.1:9001",
+      "deny_paths": ["/static/private"]
+    },
+    {
+      "name": "admin",
+      "prefix": "/admin",
+      "upstream": "http://127.0.0.1:9002",
+      "allow": ["127.0.0.1", "10.0.0.0/8"],
+      "deny": ["10.9.0.0/16"],
+      "deny_paths": ["/admin/ops"]
+    },
+    {
+      "name": "api",
+      "prefix": "/api",
+      "upstream": "http://127.0.0.1:9003"
+    },
+    {
+      "name": "fallback",
+      "prefix": "/",
+      "upstream": "http://127.0.0.1:9004",
+      "deny_paths": ["/admin"]
+    }
+  ]
+}

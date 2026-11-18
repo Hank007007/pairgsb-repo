@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "leaseledger"
+version = "0.1.0"
+description = "短期凭据租约服务内核（签发 / 续租 / 吊销 / 回收）"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["leaseledger*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

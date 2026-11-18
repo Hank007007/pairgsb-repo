@@ -1,0 +1,32 @@
+[
+  {
+    "id": "lease-export-001",
+    "subject": "svc-orders",
+    "scopes": ["read"],
+    "issued_at": "2026-01-01T12:00:00",
+    "expires_at": "2026-01-01T13:00:00",
+    "parent_lease_id": null,
+    "revoked_at": null,
+    "revoked_reason": null
+  },
+  {
+    "id": "lease-export-002",
+    "subject": "svc-orders",
+    "scopes": ["read"],
+    "issued_at": "2026-01-01T12:05:00",
+    "expires_at": "2026-01-01T12:15:00",
+    "parent_lease_id": "lease-export-001",
+    "revoked_at": null,
+    "revoked_reason": null
+  },
+  {
+    "id": "lease-export-003",
+    "subject": "svc-billing",
+    "scopes": ["read", "billing:invoice"],
+    "issued_at": "2026-01-01T11:00:00",
+    "expires_at": "2026-01-01T11:30:00",
+    "parent_lease_id": null,
+    "revoked_at": null,
+    "revoked_reason": null
+  }
+]

@@ -68,16 +68,21 @@ def eval_binary(node: nodes.Binary, context: Context) -> Any:
     right = _eval(node.right, context)
     if node.op in _COMPARISON_OPS:
         return eval_compare(node.op, left, right)
-    if node.op == "+":
-        return left + right
-    if node.op == "-":
-        return left - right
-    if node.op == "*":
-        return left * right
-    if node.op == "/":
-        return left / right
-    if node.op == "%":
-        return left % right
+    try:
+        if node.op == "+":
+            return left + right
+        if node.op == "-":
+            return left - right
+        if node.op == "*":
+            return left * right
+        if node.op == "/":
+            return left / right
+        if node.op == "%":
+            return left % right
+    except (TypeError, ZeroDivisionError) as exc:
+        raise EvaluationError(
+            f"cannot apply {node.op!r} to {left!r} and {right!r}"
+        ) from exc
     raise EvaluationError(f"unknown binary operator {node.op!r}")
 
 

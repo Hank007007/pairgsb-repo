@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict
 
-from .errors import EvaluationError
+from .errors import AccessDenied, EvaluationError
 
 
 def _startswith(value: Any, prefix: Any) -> bool:
@@ -46,7 +46,7 @@ FUNCTION_NAMES = frozenset(FUNCTIONS)
 def call_function(name: str, args: tuple) -> Any:
     func = FUNCTIONS.get(name)
     if func is None:
-        raise EvaluationError(f"unknown function {name!r}")
+        raise AccessDenied(f"function {name!r} is not available")
     try:
         return func(*args)
     except TypeError as exc:

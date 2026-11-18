@@ -12,3 +12,6 @@ dist/
 .venv/
 venv/
 .env
+
+# 本机构建脚手架
+.build.prompt.txt

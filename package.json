@@ -1,0 +1,14 @@
+{
+  "name": "parambind",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Query builder for the internal data service",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test"
+  }
+}

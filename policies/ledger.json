@@ -1,0 +1,37 @@
+{
+  "name": "ledger",
+  "description": "Call table for the ledger API.",
+  "version": 3,
+  "rules": [
+    {
+      "id": "ledger-payments-debit",
+      "from": "payments",
+      "to": "/ledger.v1.Ledger/Debit",
+      "effect": "permit"
+    },
+    {
+      "id": "ledger-payments-balance",
+      "from": "payments",
+      "to": "/ledger.v1.Ledger/Balance",
+      "effect": "permit"
+    },
+    {
+      "id": "ledger-payments-backup-balance",
+      "from": "payments-backup",
+      "to": "/ledger.v1.Ledger/Balance",
+      "effect": "permit"
+    },
+    {
+      "id": "ledger-reporting-read",
+      "from": "reporting",
+      "to": "/ledger.v1.Ledger/*",
+      "effect": "permit"
+    },
+    {
+      "id": "ledger-admin-anything",
+      "from": "admin",
+      "to": "/ledger.v1.Ledger/*",
+      "effect": "permit"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+# Build output
+/bin/
+/dist/
+/build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test and coverage output
+*.test
+*.out
+coverage.*
+*.cover
+*.coverprofile
+
+# Go workspace and tooling caches
+/vendor/
+go.work
+go.work.sum
+.gocache/
+.gomodcache/
+
+# Local run artifacts
+/tmp/
+/devcerts/
+*.log
+*.pid
+*.pem
+!internal/bundle/**/*.pem
+
+# Local task notes
+.build.prompt.txt
+
+# Editors and OS files
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db

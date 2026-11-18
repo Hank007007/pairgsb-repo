@@ -1,0 +1,5 @@
+{
+  "trust_domain": "corp",
+  "description": "Local trust domain for this service. Peer identities must carry URI SANs under this authority.",
+  "allowed_clock_skew_seconds": 30
+}

@@ -1,0 +1,19 @@
+{
+  "name": "audit",
+  "description": "Call table for the audit service.",
+  "version": 1,
+  "rules": [
+    {
+      "id": "audit-reader-events",
+      "from": "auditor",
+      "to": "/ledger.v1.Audit/Events",
+      "effect": "permit"
+    },
+    {
+      "id": "audit-reader-verify",
+      "from": "auditor",
+      "to": "/ledger.v1.Audit/Verify",
+      "effect": "permit"
+    }
+  ]
+}

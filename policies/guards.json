@@ -1,0 +1,19 @@
+{
+  "name": "guards",
+  "description": "Guards that remove access which broader call tables would otherwise grant.",
+  "version": 1,
+  "rules": [
+    {
+      "id": "guard-deny-reporting-debit",
+      "from": "reporting",
+      "to": "/ledger.v1.Ledger/Debit",
+      "effect": "deny"
+    },
+    {
+      "id": "guard-deny-admin-debit",
+      "from": "admin",
+      "to": "/ledger.v1.Ledger/Debit",
+      "effect": "deny"
+    }
+  ]
+}

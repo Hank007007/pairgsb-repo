@@ -1,0 +1,13 @@
+{
+  "name": "public-reads",
+  "description": "Read-only methods that any single-segment service identity may call.",
+  "version": 1,
+  "rules": [
+    {
+      "id": "public-balance",
+      "from": "*",
+      "to": "/ledger.v1.Ledger/Balance",
+      "effect": "permit"
+    }
+  ]
+}

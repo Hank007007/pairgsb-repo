@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "caveatchain"
+version = "1.0.0"
+description = "Offline capability tokens with attenuating caveat chains"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.setuptools]
+packages = ["caveatchain"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

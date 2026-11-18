@@ -90,12 +90,3 @@ func serveRequest(t *testing.T, h *Handler, uid int, req *wire.Request) *wire.Re
 	h.Identity = func(net.Conn) (int, error) { return uid, nil }
 	return h.serve(server)
 }
-
-// skipWithoutIDs skips a test whose setup needs a meaningful uid.
-func skipWithoutIDs(t *testing.T) {
-	t.Helper()
-
-	if os.Getuid() < 0 {
-		t.Skip("this platform does not report a numeric uid")
-	}
-}

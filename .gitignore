@@ -17,9 +17,6 @@ coverage.*
 .demo/
 *.sock
 
-# Local build prompt
-/.build.prompt.txt
-
 # Editors and operating systems
 .DS_Store
 Thumbs.db

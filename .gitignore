@@ -1,0 +1,25 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+*.prof
+coverage.*
+
+# Go workspace and vendor data
+go.work
+go.work.sum
+vendor/
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local caches, temporary files and logs
+.cache/
+tmp/
+*.log
+.build.prompt.txt

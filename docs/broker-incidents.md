@@ -46,7 +46,9 @@ Reproduction on the review host: `/srv/tenants/acme/reports`,
 `/srv/tenants/acme/private/reports`, and
 `/srv/tenants/acme/private/deeper/reports` all select the
 `/srv/tenants/*/reports` rule, and `/srv/tenants/acme-evil/x` selects the rule
-for `/srv/tenants/acme/**`.
+for `/srv/tenants/acme/**`. The `..` case is normalised to
+`/srv/tenants/beta` before matching, as the design document requires, and the
+review could not reproduce a grant from it.
 
 ---
 
@@ -103,19 +105,22 @@ assume the same checks apply.
 
 ---
 
-## INC-2024-06-03 — "empty pattern behaviour"
+## INC-2024-06-03 — "two loose ends from the same review"
 
 Reported by: security review.
 
 Two lower-priority observations from the same review as INC-2024-04-02,
 recorded here so they are not lost:
 
-* A request path with a trailing slash, or with `//` inside it, was treated as
-  a different path from its normalised form in some parts of the daemon and the
-  same path in others.
+* A request path with a trailing slash, or with `//` inside it, was feared to
+  be treated as a different path from its normalised form. After normalisation
+  the daemon does compare the same string in both places; the review could not
+  turn the concern into a request that behaves differently.
 * A pattern ending in a literal directory name, such as
   `/srv/tenants/acme/reports`, was reported by one tenant as not covering
-  `/srv/tenants/acme/reports/q1.csv`, while the same tenant reported that it
-  did cover it on another host. The two hosts run the same access file.
+  `/srv/tenants/acme/reports/q1.csv`. On the review host it does cover it. The
+  report could not be reproduced, and the tenant's two hosts are believed to
+  run different access files.
 
-Neither was reproducible on demand.
+Neither turned into a finding. They are recorded because the reviewer asked
+for them to stay visible.

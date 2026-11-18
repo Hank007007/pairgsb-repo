@@ -91,6 +91,8 @@ func (e *Entry) Open() (io.ReadCloser, error) {
 type Reader interface {
 	// Next returns the next entry, or io.EOF when the package is exhausted.
 	Next() (*Entry, error)
+	// CompressedConsumed reports how much compressed input has been read.
+	CompressedConsumed() int64
 	// Close releases any resources held by the reader.
 	Close() error
 }
@@ -120,34 +122,54 @@ func Open(path string) (Reader, error) {
 
 	switch {
 	case n >= 2 && head[0] == 0x1f && head[1] == 0x8b:
-		gz, err := gzip.NewReader(f)
+		var consumed int64
+		counter := &countingReader{r: f, n: &consumed}
+		gz, err := gzip.NewReader(counter)
 		if err != nil {
 			f.Close()
 			return nil, err
 		}
-		return newTarReader(gz, multiCloser{gz, f}, "tar.gz"), nil
+		return newTarReader(gz, multiCloser{gz, f}, "tar.gz", &consumed), nil
 	case n >= 4 && bytes.Equal(head[:4], []byte{'P', 'K', 0x03, 0x04}):
 		return newZipReader(f, info.Size())
 	case n >= 262 && string(head[257:262]) == "ustar":
-		return newTarReader(f, f, "tar"), nil
+		var consumed int64
+		counter := &countingReader{r: f, n: &consumed}
+		return newTarReader(counter, f, "tar", &consumed), nil
 	}
 
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".zip":
 		return newZipReader(f, info.Size())
 	case ".tar":
-		return newTarReader(f, f, "tar"), nil
+		var consumed int64
+		counter := &countingReader{r: f, n: &consumed}
+		return newTarReader(counter, f, "tar", &consumed), nil
 	case ".tgz", ".tar.gz":
-		gz, err := gzip.NewReader(f)
+		var consumed int64
+		counter := &countingReader{r: f, n: &consumed}
+		gz, err := gzip.NewReader(counter)
 		if err != nil {
 			f.Close()
 			return nil, err
 		}
-		return newTarReader(gz, multiCloser{gz, f}, "tar.gz"), nil
+		return newTarReader(gz, multiCloser{gz, f}, "tar.gz", &consumed), nil
 	}
 
 	f.Close()
 	return nil, fmt.Errorf("archive: unrecognised package format")
+}
+
+// countingReader adds the number of bytes read from r to n.
+type countingReader struct {
+	r io.Reader
+	n *int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	k, err := c.r.Read(p)
+	*c.n += int64(k)
+	return k, err
 }
 
 // multiCloser closes several resources in order.

@@ -15,14 +15,15 @@ const tarBlockSize = 512
 // tarReader reads entries from a tar stream. The stream may be a plain tar
 // file or the decompressed body of a gzip container.
 type tarReader struct {
-	src    io.Reader
-	closer io.Closer
-	label  string
-	cur    *tarSection
+	src      io.Reader
+	closer   io.Closer
+	label    string
+	consumed *int64
+	cur      *tarSection
 }
 
-func newTarReader(src io.Reader, closer io.Closer, label string) *tarReader {
-	return &tarReader{src: src, closer: closer, label: label}
+func newTarReader(src io.Reader, closer io.Closer, label string, consumed *int64) *tarReader {
+	return &tarReader{src: src, closer: closer, label: label, consumed: consumed}
 }
 
 // tarSection is the data area of the entry currently being read, plus the
@@ -67,6 +68,13 @@ func (t *tarReader) Close() error {
 		return t.closer.Close()
 	}
 	return nil
+}
+
+func (t *tarReader) CompressedConsumed() int64 {
+	if t.consumed == nil {
+		return 0
+	}
+	return *t.consumed
 }
 
 func (t *tarReader) Next() (*Entry, error) {

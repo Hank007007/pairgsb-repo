@@ -12,10 +12,11 @@ import (
 
 // zipReader reads entries from a zip container.
 type zipReader struct {
-	zr   *zip.Reader
-	file *os.File
-	next int
-	cur  io.ReadCloser
+	zr         *zip.Reader
+	file       *os.File
+	next       int
+	cur        io.ReadCloser
+	compressed int64
 }
 
 func newZipReader(f *os.File, size int64) (*zipReader, error) {
@@ -33,6 +34,10 @@ func (z *zipReader) Close() error {
 		z.cur = nil
 	}
 	return z.file.Close()
+}
+
+func (z *zipReader) CompressedConsumed() int64 {
+	return z.compressed
 }
 
 func (z *zipReader) Next() (*Entry, error) {
@@ -99,11 +104,12 @@ func (z *zipReader) openEntry(f *zip.File) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, fmt.Errorf("archive: open %q: %w", f.Name, err)
 	}
+	counted := &countingReader{r: raw, n: &z.compressed}
 	switch f.Method {
 	case zip.Store:
-		return io.NopCloser(raw), nil
+		return io.NopCloser(counted), nil
 	case zip.Deflate:
-		return flate.NewReader(raw), nil
+		return flate.NewReader(counted), nil
 	default:
 		return nil, fmt.Errorf("archive: unsupported compression method %d for %q", f.Method, f.Name)
 	}

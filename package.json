@@ -1,0 +1,25 @@
+{
+  "name": "verdictmesh",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "An embeddable policy decision point for service authorization.",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "example": "node examples/decide.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "authorization",
+    "policy",
+    "pdp"
+  ],
+  "license": "UNLICENSED",
+  "dependencies": {}
+}

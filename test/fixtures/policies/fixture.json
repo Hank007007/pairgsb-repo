@@ -1,0 +1,30 @@
+{
+  "rules": [
+    {
+      "id": "fixture-health-read",
+      "description": "Health checks are readable by any service principal.",
+      "principal": "/services/*",
+      "resource": "/healthz",
+      "action": ["read"],
+      "effect": "permit"
+    },
+    {
+      "id": "fixture-release-read",
+      "description": "Release metadata requires membership.",
+      "principal": "/users/*",
+      "resource": "/release",
+      "action": ["read"],
+      "condition": { "role": "member" },
+      "effect": "permit"
+    },
+    {
+      "id": "fixture-release-locked",
+      "description": "Locked releases cannot be rewritten.",
+      "principal": "/users/*",
+      "resource": "/release",
+      "action": ["write"],
+      "condition": { "locked": true },
+      "effect": "deny"
+    }
+  ]
+}

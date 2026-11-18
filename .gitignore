@@ -1,0 +1,16 @@
+node_modules/
+coverage/
+.nyc_output/
+.cache/
+.tmp/
+dist/
+build/
+out/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.env
+.env.*
+.build.prompt.txt
+*.prompt.txt

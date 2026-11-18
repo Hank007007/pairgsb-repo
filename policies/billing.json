@@ -1,0 +1,40 @@
+{
+  "rules": [
+    {
+      "id": "billing-member-read",
+      "description": "Members may read invoices.",
+      "principal": "/users/*",
+      "resource": "/billing/invoices/**",
+      "action": ["read"],
+      "condition": { "role": { "in": ["member", "admin"] } },
+      "effect": "permit"
+    },
+    {
+      "id": "billing-member-pay",
+      "description": "Members may pay invoices that are not locked.",
+      "principal": "/users/*",
+      "resource": "/billing/invoices/**",
+      "action": ["pay"],
+      "condition": { "role": { "in": ["member", "admin"] }, "locked": false },
+      "effect": "permit"
+    },
+    {
+      "id": "billing-locked-deny",
+      "description": "Locked invoices are read-only.",
+      "principal": "/users/*",
+      "resource": "/billing/invoices/**",
+      "action": ["pay", "refund"],
+      "condition": { "locked": true },
+      "effect": "deny"
+    },
+    {
+      "id": "billing-high-value-deny",
+      "description": "Refunds above the self-service limit need back-office handling.",
+      "principal": "/users/*",
+      "resource": "/billing/invoices/**",
+      "action": ["refund"],
+      "condition": { "amount": { "gt": 500 }, "role": "member" },
+      "effect": "deny"
+    }
+  ]
+}

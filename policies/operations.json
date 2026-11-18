@@ -1,0 +1,21 @@
+{
+  "rules": [
+    {
+      "id": "service-health-public",
+      "description": "Health endpoints are public.",
+      "principal": "/services/*",
+      "resource": "/healthz",
+      "action": ["read"],
+      "effect": "permit"
+    },
+    {
+      "id": "service-metrics-internal",
+      "description": "Only operators may read metrics.",
+      "principal": "/services/*",
+      "resource": "/metrics/**",
+      "action": ["read"],
+      "condition": { "role": "operator" },
+      "effect": "permit"
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "rules": [
+    {
+      "id": "users-read-own-profile",
+      "description": "Any authenticated user may read the profile under their own name.",
+      "principal": "/users/*",
+      "resource": "/profiles/*",
+      "action": ["read"],
+      "condition": { "authenticated": true },
+      "effect": "permit"
+    },
+    {
+      "id": "docs-member-read",
+      "description": "Members may read documents.",
+      "principal": "/users/*",
+      "resource": "/docs/**",
+      "action": ["read"],
+      "condition": { "role": { "in": ["member", "admin"] } },
+      "effect": "permit"
+    },
+    {
+      "id": "docs-member-write",
+      "description": "Members may create documents.",
+      "principal": "/users/*",
+      "resource": "/docs/**",
+      "action": ["create"],
+      "condition": { "role": { "in": ["member", "admin"] } },
+      "effect": "permit"
+    },
+    {
+      "id": "docs-archived-readonly",
+      "description": "Archived documents cannot be modified.",
+      "principal": "/users/*",
+      "resource": "/docs/**",
+      "action": ["update", "delete"],
+      "condition": { "archived": true },
+      "effect": "deny"
+    },
+    {
+      "id": "docs-admin-manage",
+      "description": "Administrators may manage all documents.",
+      "principal": "/users/*",
+      "resource": "/docs/**",
+      "action": ["read", "create", "update", "delete"],
+      "condition": { "role": "admin" },
+      "effect": "permit"
+    }
+  ]
+}

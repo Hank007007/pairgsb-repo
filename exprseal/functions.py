@@ -49,5 +49,5 @@ def call_function(name: str, args: tuple) -> Any:
         raise AccessDenied(f"function {name!r} is not available")
     try:
         return func(*args)
-    except TypeError as exc:
+    except Exception as exc:
         raise EvaluationError(f"bad arguments for {name!r}: {exc}") from exc

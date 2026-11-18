@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List
 
-from .errors import ParseError
+from .errors import LimitExceeded, ParseError
+from .limits import MAX_EXPRESSION_BYTES
 
 KEYWORDS = {
     "and",
@@ -38,21 +39,31 @@ class Token:
 
 class Lexer:
     def __init__(self, source: str) -> None:
+        if not isinstance(source, str):
+            raise ParseError("expression source must be a string")
         self._source = source
         self._index = 0
         self._length = len(source)
         self._tokens: List[Token] = []
 
     def tokenize(self) -> List[Token]:
+        try:
+            size = len(self._source.encode("utf-8"))
+        except (AttributeError, UnicodeEncodeError) as exc:
+            raise ParseError("expression source must be a UTF-8 string") from exc
+        if size > MAX_EXPRESSION_BYTES:
+            raise LimitExceeded(
+                f"expression source exceeds {MAX_EXPRESSION_BYTES} bytes"
+            )
         while self._index < self._length:
             char = self._source[self._index]
             if char in " \t\r\n":
                 self._index += 1
                 continue
-            if char.isalpha() or char == "_":
+            if char == "_" or ("a" <= char <= "z") or ("A" <= char <= "Z"):
                 self._read_identifier()
                 continue
-            if char.isdigit():
+            if "0" <= char <= "9":
                 self._read_number()
                 continue
             if char in ("'", '"'):
@@ -66,7 +77,12 @@ class Lexer:
         start = self._index
         while self._index < self._length:
             char = self._source[self._index]
-            if char.isalnum() or char == "_":
+            if (
+                char == "_"
+                or ("a" <= char <= "z")
+                or ("A" <= char <= "Z")
+                or ("0" <= char <= "9")
+            ):
                 self._index += 1
             else:
                 break
@@ -76,20 +92,23 @@ class Lexer:
 
     def _read_number(self) -> None:
         start = self._index
-        while self._index < self._length and self._source[self._index].isdigit():
+        while (
+            self._index < self._length
+            and "0" <= self._source[self._index] <= "9"
+        ):
             self._index += 1
         is_float = False
         if (
             self._index < self._length
             and self._source[self._index] == "."
             and self._index + 1 < self._length
-            and self._source[self._index + 1].isdigit()
+            and "0" <= self._source[self._index + 1] <= "9"
         ):
             is_float = True
             self._index += 1
             while (
                 self._index < self._length
-                and self._source[self._index].isdigit()
+                and "0" <= self._source[self._index] <= "9"
             ):
                 self._index += 1
         text = self._source[start:self._index]
@@ -107,7 +126,7 @@ class Lexer:
                 self._index += 1
                 self._tokens.append(Token("string", "".join(parts), start))
                 return
-            if char == "\n":
+            if char in "\r\n":
                 raise ParseError(f"unterminated string starting at position {start}")
             if char == "\\":
                 self._index += 1

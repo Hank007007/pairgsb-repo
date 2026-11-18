@@ -1,0 +1,35 @@
+# Build output
+/keycustody
+/keycustody.exe
+/cmd/keycustody/keycustody
+/cmd/keycustody/keycustody.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go test and tool artifacts
+*.test
+*.out
+coverage.*
+/vendor/
+/go.work
+/go.work.sum
+
+# Local caches
+/.cache/
+/.gocache/
+/.gomodcache/
+/bin/
+/tmp/
+
+# Editor and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local scratch
+.build.prompt.txt

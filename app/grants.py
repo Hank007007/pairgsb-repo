@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import secrets
 import time
@@ -19,6 +21,17 @@ from .scopes import normalize_scope
 from .tokens import issue_access_token, issue_refresh_token
 
 PKCE_METHOD = "S256"
+
+
+def _s256_challenge(verifier: str) -> str:
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+def _is_valid_verifier(verifier: str) -> bool:
+    if not 43 <= len(verifier) <= 128:
+        return False
+    return verifier.isascii()
 
 
 def create_authorization_code(
@@ -45,6 +58,8 @@ def create_authorization_code(
         raise OAuthError(
             "invalid_request", "unsupported code_challenge_method", status_code=400
         )
+    if code_challenge and code_challenge_method is None:
+        code_challenge_method = PKCE_METHOD
     if may_act is not None and not isinstance(may_act.get("sub"), str):
         raise OAuthError(
             "invalid_request", "may_act must be an object with a sub", status_code=400
@@ -103,7 +118,9 @@ def exchange_authorization_code(
     if challenge:
         if not code_verifier:
             raise OAuthError("invalid_grant", "code_verifier is required")
-        if challenge != code_verifier:
+        if not _is_valid_verifier(code_verifier):
+            raise OAuthError("invalid_grant", "code_verifier is malformed")
+        if _s256_challenge(code_verifier) != challenge:
             raise OAuthError(
                 "invalid_grant", "code_verifier does not match code_challenge"
             )

@@ -41,8 +41,13 @@ def rotate(
     if is_revoked(database, claims):
         raise OAuthError("invalid_grant", "refresh token revoked")
 
+    if audience is not None and audience != claims["aud"]:
+        raise OAuthError(
+            "invalid_grant", "audience cannot change across a refresh"
+        )
+
     now = int(time.time())
-    target_audience = audience or claims["aud"]
+    target_audience = claims["aud"]
     may_act = json.loads(row["may_act"]) if row["may_act"] else None
     family_id = row["family_id"]
 

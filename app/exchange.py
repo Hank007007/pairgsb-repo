@@ -20,6 +20,19 @@ SUBJECT_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
 REQUESTED_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
 
 
+def _may_act_subjects(may_act: dict | None) -> list[str]:
+    """Flatten a may_act chain into the client ids it names, outermost first."""
+    subjects: list[str] = []
+    node = may_act
+    while isinstance(node, dict):
+        sub = node.get("sub")
+        if not isinstance(sub, str):
+            break
+        subjects.append(sub)
+        node = node.get("act")
+    return subjects
+
+
 def token_exchange(
     database: Database,
     settings: Settings,
@@ -46,11 +59,25 @@ def token_exchange(
 
     subject_claims = validate_access_token(database, settings, subject_token)
 
+    subject_may_act = subject_claims.get("may_act")
+    if client_id not in _may_act_subjects(subject_may_act):
+        raise OAuthError(
+            "invalid_grant",
+            "the subject token does not allow this client to act",
+        )
+    if may_act is not None and may_act != subject_may_act:
+        raise OAuthError(
+            "invalid_grant",
+            "may_act may only restate the delegation the grant recorded",
+        )
+
     now = int(time.time())
     granted = subject_claims.get("scope", "")
 
     family_id = uuid.uuid4().hex
     act = {"sub": client_id}
+    if subject_claims.get("act") is not None:
+        act["act"] = subject_claims["act"]
 
     from .tokens import issue_access_token
 
@@ -63,7 +90,7 @@ def token_exchange(
         scope=scope,
         audience=audience,
         family_id=family_id,
-        may_act=may_act if may_act is not None else subject_claims.get("may_act"),
+        may_act=subject_may_act,
         act=act,
         now=now,
     )

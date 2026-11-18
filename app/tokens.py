@@ -14,7 +14,7 @@ from typing import Any
 from .config import Settings
 from .db import Database, insert_access_token, insert_refresh_token
 from .jose_lite import encode
-from .scopes import normalize_scope
+from .scopes import intersect_scope, normalize_scope
 
 ACCESS_TOKEN_TYPE = "access_token"
 REFRESH_TOKEN_TYPE = "refresh_token"
@@ -74,7 +74,7 @@ def issue_access_token(
     ``scope`` is what this particular request asked for.
     """
     issued_at = int(time.time()) if now is None else int(now)
-    issued_scope = normalize_scope(scope) if scope else normalize_scope(granted_scope)
+    issued_scope = intersect_scope(granted_scope, scope)
     jti = uuid.uuid4().hex
     claims = _claims(
         token_type=ACCESS_TOKEN_TYPE,

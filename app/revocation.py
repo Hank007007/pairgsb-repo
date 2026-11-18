@@ -16,10 +16,17 @@ def is_revoked(database: Database, claims: Mapping) -> bool:
     jti = claims.get("jti")
     if not jti:
         return False
+    family_id = claims.get("family_id")
     with database.connect() as connection:
-        row = connection.execute(
-            "SELECT 1 FROM revoked_tokens WHERE jti = ?", (jti,)
-        ).fetchone()
+        if family_id:
+            row = connection.execute(
+                "SELECT 1 FROM revoked_tokens WHERE jti = ? OR family_id = ?",
+                (jti, family_id),
+            ).fetchone()
+        else:
+            row = connection.execute(
+                "SELECT 1 FROM revoked_tokens WHERE jti = ?", (jti,)
+            ).fetchone()
     return row is not None
 
 

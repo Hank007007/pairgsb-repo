@@ -1,0 +1,56 @@
+{
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 8080
+  },
+  "token": {
+    "issuer": "https://auth.internal.hopguard",
+    "audience": "hopguard-edge",
+    "algorithms": ["RS256"],
+    "clockToleranceSeconds": 30
+  },
+  "defaultRoute": "public-site",
+  "upstreams": {
+    "public-site": "http://127.0.0.1:9210",
+    "orders": "http://127.0.0.1:9211",
+    "catalog": "http://127.0.0.1:9212",
+    "reports": "http://127.0.0.1:9213"
+  },
+  "routes": [
+    {
+      "id": "admin-reports",
+      "prefix": "/admin",
+      "upstream": "reports",
+      "auth": {
+        "required": true,
+        "scopes": ["admin:export"]
+      }
+    },
+    {
+      "id": "orders",
+      "prefix": "/orders",
+      "upstream": "orders",
+      "auth": {
+        "required": true,
+        "scopes": ["orders:read"]
+      }
+    },
+    {
+      "id": "catalog",
+      "prefix": "/catalog",
+      "upstream": "catalog",
+      "auth": {
+        "required": true,
+        "scopes": ["catalog:read"]
+      }
+    },
+    {
+      "id": "public-site",
+      "prefix": "/public",
+      "upstream": "public-site",
+      "auth": {
+        "required": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "hopguard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Edge authorization proxy for internal HTTP services",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "jose": "^6.2.17"
+  }
+}

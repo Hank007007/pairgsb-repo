@@ -130,9 +130,10 @@ Two call forms are accepted:
 
 The whitelist applies to both forms. `foo.bar(...)` is rejected unless `bar`
 is one of the names above; it is **not** sufficient for `bar` to exist on the
-object. Calling a non-whitelisted method, calling a whitelisted name with the
-wrong arity, or calling anything that is not a whitelisted function raises
-`AccessDenied` or `EvaluationError` — never a host-language exception.
+object. Calling any name outside the whitelist raises `AccessDenied`. Calling
+a whitelisted name with the wrong arity raises `EvaluationError`. A
+host-language exception (`AttributeError`, `TypeError`, `ValueError`, ...)
+must never escape the engine.
 
 ## 6. Errors
 

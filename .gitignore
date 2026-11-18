@@ -1,0 +1,30 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.*
+
+# Go workspace and local caches
+go.work
+go.work.sum
+/.gocache/
+/.gotmp/
+
+# Job scratch space
+/jobs/
+/tmp/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local build notes
+/.build.prompt.txt

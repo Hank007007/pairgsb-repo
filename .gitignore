@@ -7,7 +7,7 @@
 *.dll
 *.so
 *.dylib
-pathvaultd
+/pathvaultd
 
 # test output and coverage
 *.test

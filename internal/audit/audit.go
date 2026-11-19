@@ -19,7 +19,9 @@ type Event struct {
 	Decision string `json:"decision"`
 	LeaseID  string `json:"lease_id,omitempty"`
 	Backend  string `json:"backend,omitempty"`
-	Value    string `json:"value,omitempty"`
+	// Value is never serialized; audit records must not contain secret
+	// material in any form.
+	Value string `json:"-"`
 }
 
 // Logger writes events as newline-delimited JSON.

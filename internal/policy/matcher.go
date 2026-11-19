@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 )
 
@@ -40,45 +39,43 @@ type fileShape struct {
 	Accessors []Accessor `json:"accessors"`
 }
 
-// globToRegexp translates a segment pattern into an anchored regular
-// expression. A `**` segment may cover any number of path segments, including
-// none; a `*` segment stands for one path segment.
-func globToRegexp(pattern string) string {
-	segs := strings.Split(pattern, "/")
-	var b strings.Builder
-	b.WriteString("^")
-	for i, seg := range segs {
-		switch seg {
-		case "**":
-			if i == 0 {
-				b.WriteString(".*")
-			} else {
-				b.WriteString("(?:/.*)?")
+// MatchGlob reports whether path matches pattern. Both arguments are full
+// paths; matching is anchored at both ends. A `*` segment matches exactly one
+// non-empty segment, while a `**` segment matches zero or more segments.
+func MatchGlob(pattern, path string) bool {
+	patternSegs := strings.Split(pattern, "/")
+	pathSegs := strings.Split(path, "/")
+
+	// dp[i][j] reports whether patternSegs[i:] can match pathSegs[j:].
+	dp := make([][]bool, len(patternSegs)+1)
+	for i := range dp {
+		dp[i] = make([]bool, len(pathSegs)+1)
+	}
+	dp[len(patternSegs)][len(pathSegs)] = true
+
+	for i := len(patternSegs) - 1; i >= 0; i-- {
+		for j := len(pathSegs); j >= 0; j-- {
+			switch patternSegs[i] {
+			case "**":
+				// Match zero segments or consume one more segment.
+				if dp[i+1][j] {
+					dp[i][j] = true
+				}
+				if j < len(pathSegs) && pathSegs[j] != "" && dp[i][j+1] {
+					dp[i][j] = true
+				}
+			case "*":
+				if j < len(pathSegs) && pathSegs[j] != "" && dp[i+1][j+1] {
+					dp[i][j] = true
+				}
+			default:
+				if j < len(pathSegs) && pathSegs[j] == patternSegs[i] && dp[i+1][j+1] {
+					dp[i][j] = true
+				}
 			}
-		case "*":
-			if i > 0 {
-				b.WriteString("/")
-			}
-			b.WriteString(".*")
-		default:
-			if i > 0 {
-				b.WriteString("/")
-			}
-			b.WriteString(regexp.QuoteMeta(seg))
 		}
 	}
-	b.WriteString("$")
-	return b.String()
-}
-
-// MatchGlob reports whether path matches pattern. Both arguments are full
-// paths; matching is anchored at both ends.
-func MatchGlob(pattern, path string) bool {
-	re, err := regexp.Compile(globToRegexp(pattern))
-	if err != nil {
-		return false
-	}
-	return re.MatchString(path)
+	return dp[0][0]
 }
 
 // Load reads a policy file and returns its accessors.
@@ -135,14 +132,20 @@ func (p *Policy) ByToken(token string) (*Accessor, bool) {
 	return a, ok
 }
 
-// Evaluate decides whether a is allowed to read path, using the first rule
-// whose pattern matches.
+// Evaluate decides whether a is allowed to read path. Deny always wins over
+// allow; rule order has no semantic effect.
 func (a *Accessor) Evaluate(path string) bool {
+	allowed := false
 	for _, r := range a.Rules {
 		if !MatchGlob(r.Path, path) {
 			continue
 		}
-		return r.Effect == Allow
+		if r.Effect == Deny {
+			return false
+		}
+		if r.Effect == Allow {
+			allowed = true
+		}
 	}
-	return false
+	return allowed
 }

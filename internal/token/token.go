@@ -59,7 +59,7 @@ func (m *Manager) Mint(accessor, path string, ttl int64) (*Wrap, error) {
 	if ttl <= 0 {
 		expires = now.Add(DefaultTTL)
 	} else {
-		expires = now.Add(time.Duration(ttl))
+		expires = now.Add(time.Duration(ttl) * time.Second)
 	}
 	w := &Wrap{
 		Value:     value,
@@ -82,9 +82,11 @@ func (m *Manager) Unwrap(value string) (*Wrap, error) {
 	if !ok {
 		return nil, ErrNotFound
 	}
-	if m.nowFunc().After(w.ExpiresAt) {
+	if !m.nowFunc().Before(w.ExpiresAt) {
+		delete(m.wraps, value)
 		return nil, ErrNotFound
 	}
+	delete(m.wraps, value)
 	return w, nil
 }
 

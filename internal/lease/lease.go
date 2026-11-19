@@ -4,6 +4,7 @@ package lease
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -128,15 +129,23 @@ func (m *Manager) LeasesFor(backend string) []string {
 func (m *Manager) Revoke(backend string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	ids := m.byBack[backend]
-	if len(ids) == 0 {
-		return 0
+
+	revoked := 0
+	for _, id := range m.byBack[backend] {
+		l, ok := m.leases[id]
+		if !ok || l.Revoked {
+			continue
+		}
+		l.Revoked = true
+		l.RevokedAt = m.nowFunc()
+		revoked++
 	}
-	l, ok := m.leases[ids[len(ids)-1]]
-	if !ok || l.Revoked {
-		return 0
+
+	prefix := backend + "\x00"
+	for key := range m.cache {
+		if strings.HasPrefix(key, prefix) {
+			delete(m.cache, key)
+		}
 	}
-	l.Revoked = true
-	l.RevokedAt = m.nowFunc()
-	return 1
+	return revoked
 }

@@ -145,7 +145,6 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 		Decision: "allow",
 		LeaseID:  l.ID,
 		Backend:  secret.Backend,
-		Value:    secret.Value,
 	})
 	writeJSON(w, http.StatusOK, secretBody{
 		Path:    path,
@@ -192,7 +191,6 @@ func (s *Server) serveLeaseRead(w http.ResponseWriter, accessor, path, leaseID s
 		Decision: "allow",
 		LeaseID:  leaseID,
 		Backend:  l.Backend,
-		Value:    value,
 	})
 	writeJSON(w, http.StatusOK, secretBody{
 		Path:    path,
@@ -277,7 +275,6 @@ func (s *Server) handleUnwrap(w http.ResponseWriter, r *http.Request) {
 		Decision: "allow",
 		LeaseID:  l.ID,
 		Backend:  secret.Backend,
-		Value:    secret.Value,
 	})
 	writeJSON(w, http.StatusOK, secretBody{
 		Path:    wrap.Path,

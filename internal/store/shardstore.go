@@ -17,6 +17,7 @@ var (
 	ErrInvalidCustodyID  = errors.New("store: custody-id must not be empty")
 	ErrInvalidShardID    = errors.New("store: shard-id must not be empty")
 	ErrCiphertextCorrupt = errors.New("store: shard ciphertext failed integrity check")
+	ErrCustodyMismatch   = errors.New("store: shard belongs to a different custody-id")
 )
 
 // Record is the metadata retained alongside an encrypted shard.
@@ -90,7 +91,9 @@ func (s *ShardStore) Put(custodyID, shardID, splitID string, generation, index, 
 	return nil
 }
 
-// Get returns the plaintext shard identified by shardID.
+// Get returns the plaintext shard identified by shardID. The requesting
+// custodyID must match the record's owning custody-id; otherwise an error is
+// returned without decrypting or disclosing any shard data or metadata.
 func (s *ShardStore) Get(custodyID, shardID string) ([]byte, Record, error) {
 	if custodyID == "" {
 		return nil, Record{}, ErrInvalidCustodyID
@@ -104,6 +107,9 @@ func (s *ShardStore) Get(custodyID, shardID string) ([]byte, Record, error) {
 	s.mu.RUnlock()
 	if !ok {
 		return nil, Record{}, ErrShardNotFound
+	}
+	if rec.CustodyID != custodyID {
+		return nil, Record{}, ErrCustodyMismatch
 	}
 
 	nonceSize := s.aead.NonceSize()

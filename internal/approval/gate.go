@@ -46,19 +46,23 @@ func (g Gate) Evaluate(votes []Vote) (Result, error) {
 	}
 
 	var result Result
+	approvers := make(map[string]struct{})
+	rejectors := make(map[string]struct{})
 	for _, v := range votes {
 		if v.ApproverID == "" {
 			continue
 		}
 		switch v.Decision {
 		case DecisionApprove:
-			result.Approvals++
+			approvers[v.ApproverID] = struct{}{}
 		case DecisionReject:
-			result.Rejections++
+			rejectors[v.ApproverID] = struct{}{}
 		default:
 			return Result{}, fmt.Errorf("approval: unknown decision %q", v.Decision)
 		}
 	}
+	result.Approvals = len(approvers)
+	result.Rejections = len(rejectors)
 
 	if result.Rejections > 0 {
 		return result, nil

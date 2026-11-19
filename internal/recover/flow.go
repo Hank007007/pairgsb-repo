@@ -3,7 +3,6 @@ package recover
 import (
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -87,6 +86,9 @@ func (f *Flow) Run(req Request) (Outcome, error) {
 		f.Buffer = &SensitiveBuffer{}
 	}
 	buffer := f.Buffer
+	// The buffer must be zeroed on every exit, including every failure
+	// path, so that plaintext shards never outlive a recovery attempt.
+	defer buffer.Wipe()
 
 	gateResult, err := f.Gate.Evaluate(req.Votes)
 	if err != nil {
@@ -116,7 +118,6 @@ func (f *Flow) Run(req Request) (Outcome, error) {
 			"split_id", req.SplitID,
 			"shard_id", id,
 			"custody_id", rec.CustodyID,
-			"payload", hex.EncodeToString(plaintext),
 		)
 		shards = append(shards, shard.Shard{
 			ShardID:    rec.ShardID,
@@ -140,6 +141,5 @@ func (f *Flow) Run(req Request) (Outcome, error) {
 		}
 	}
 
-	buffer.Wipe()
 	return Outcome{MasterKey: masterKey, Shards: len(shards)}, nil
 }

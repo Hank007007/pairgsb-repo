@@ -1,0 +1,46 @@
+{
+  "collection": "log_events",
+  "filter": {
+    "clauses": [
+      {
+        "clauses": [
+          {
+            "field": "status_code",
+            "op": "gte",
+            "value": 500
+          },
+          {
+            "field": "latency_ms",
+            "op": "gt",
+            "value": 2000
+          }
+        ],
+        "op": "or"
+      },
+      {
+        "field": "level",
+        "op": "in",
+        "values": [
+          "error",
+          "fatal"
+        ]
+      },
+      {
+        "field": "service",
+        "op": "eq",
+        "value": "checkout"
+      },
+      {
+        "field": "tenant_id",
+        "op": "eq",
+        "value": "acme-prod"
+      },
+      {
+        "field": "timestamp",
+        "op": "gte",
+        "value": 1760000000000
+      }
+    ],
+    "op": "and"
+  }
+}

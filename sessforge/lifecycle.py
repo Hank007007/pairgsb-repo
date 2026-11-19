@@ -88,35 +88,26 @@ def login(
 ) -> SessionRecord:
     """Authenticate ``user_id`` and return the session record to carry.
 
-    ``sid`` is the identifier the browser presented, if any.  When it refers
-    to an anonymous session the login continues on that record, so the client
-    does not have to replace its cookie.
+    ``sid`` is the identifier the browser presented, if any.  Login always
+    issues a brand-new identifier and the presented one is retired, so a
+    pre-login or lower-privilege session can never become the authenticated
+    one (policy section 3).
     """
-    existing = store.get_session(sid) if sid else None
-    if existing is not None and not existing.is_authenticated:
-        record = existing
-    else:
-        record = SessionRecord(
-            sid=new_sid(),
-            user_id=None,
-            created_at=now,
-            last_seen=now,
-            epoch=0,
-            user_agent=user_agent,
-            ip_address=ip_address,
-        )
+    if sid:
+        store.delete_session(sid)
 
-    record = replace(
-        record,
+    enforce_concurrency(store, user_id)
+
+    record = SessionRecord(
+        sid=new_sid(),
         user_id=user_id,
         created_at=now,
         last_seen=now,
         epoch=epoch.current(store, user_id),
-        user_agent=user_agent if user_agent is not None else record.user_agent,
-        ip_address=ip_address if ip_address is not None else record.ip_address,
+        user_agent=user_agent,
+        ip_address=ip_address,
     )
-    enforce_concurrency(store, user_id, record.sid)
-    store.save_session(record)
+    store.create_session(record)
     return record
 
 
@@ -128,6 +119,9 @@ def is_valid(
     """Decide whether ``record`` may still be used at time ``now``."""
     if record is None:
         return ValidationResult(None, "not_found")
+
+    if now - record.created_at > ABSOLUTE_TIMEOUT_SECONDS:
+        return ValidationResult(None, "absolute_timeout")
 
     if now - record.last_seen > IDLE_TIMEOUT_SECONDS:
         return ValidationResult(None, "idle_timeout")
@@ -170,15 +164,20 @@ def renew(store: SessionStore, sid: str, now: float) -> SessionRecord | None:
     return store.get_session(sid)
 
 
-def enforce_concurrency(store: SessionStore, user_id: str, keep_sid: str) -> None:
+def enforce_concurrency(store: SessionStore, user_id: str) -> None:
     """Apply the per-user concurrent session limit.
 
-    The session identified by ``keep_sid`` is never a candidate for removal.
+    When the user already holds :data:`MAX_SESSIONS_PER_USER` sessions the
+    one that has been idle longest (oldest ``last_seen``, ties broken by
+    ``sid``) is evicted so that the incoming login can be admitted.  The
+    session created by that login does not exist yet and therefore can never
+    be the eviction candidate.
     """
     records = store.list_user_sessions(user_id)
-    others = [item for item in records if item.sid != keep_sid]
-    if len(others) >= MAX_SESSIONS_PER_USER:
-        raise TooManySessions(user_id, len(others))
+    if len(records) < MAX_SESSIONS_PER_USER:
+        return
+    victim = min(records, key=lambda item: (item.last_seen, item.sid))
+    store.delete_session(victim.sid)
 
 
 def revoke(store: SessionStore, sid: str) -> None:

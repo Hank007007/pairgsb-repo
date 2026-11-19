@@ -46,6 +46,7 @@ class RememberToken:
     user_id: str
     issued_at: float
     expires_at: float
+    family_id: str = ""
 
 
 class SessionStore(Protocol):
@@ -90,6 +91,22 @@ class SessionStore(Protocol):
     def list_remember_tokens(self, user_id: str) -> list[RememberToken]:
         """Return every stored token record belonging to ``user_id``."""
 
+    def pop_remember_token(self, token_hash: str) -> RememberToken | None:
+        """Atomically remove and return the token, or ``None`` when absent.
+
+        Concurrent calls must resolve so that exactly one caller receives the
+        stored record; every later caller sees ``None``.
+        """
+
+    def mark_remember_token_redeemed(self, token_hash: str, family_id: str) -> None:
+        """Remember a consumed token together with the family it belonged to."""
+
+    def get_redeemed_remember_family(self, token_hash: str) -> str | None:
+        """Return the family of a consumed token, or ``None`` when unknown."""
+
+    def invalidate_remember_family(self, family_id: str) -> None:
+        """Mark a token family invalid and drop every token that remains."""
+
 
 class MemoryStore:
     """Thread-safe in-memory :class:`SessionStore` used by default and in tests."""
@@ -101,6 +118,8 @@ class MemoryStore:
         self._epochs: dict[str, int] = {}
         self._remember: dict[str, RememberToken] = {}
         self._remember_by_user: dict[str, set[str]] = {}
+        self._remember_families: dict[str, set[str]] = {}
+        self._redeemed_tokens: dict[str, str] = {}
 
     # -- sessions ---------------------------------------------------------
     def create_session(self, record: SessionRecord) -> None:
@@ -169,6 +188,8 @@ class MemoryStore:
                     bucket.discard(token_hash)
             self._remember[token_hash] = record
             self._remember_by_user.setdefault(record.user_id, set()).add(token_hash)
+            if record.family_id:
+                self._remember_families.setdefault(record.family_id, set()).add(token_hash)
 
     def get_remember_token(self, token_hash: str) -> RememberToken | None:
         with self._lock:
@@ -183,11 +204,53 @@ class MemoryStore:
                     bucket.discard(token_hash)
                     if not bucket:
                         self._remember_by_user.pop(record.user_id, None)
+                family = self._remember_families.get(record.family_id)
+                if family is not None:
+                    family.discard(token_hash)
+                    if not family:
+                        self._remember_families.pop(record.family_id, None)
 
     def list_remember_tokens(self, user_id: str) -> list[RememberToken]:
         with self._lock:
             hashes = list(self._remember_by_user.get(user_id, ()))
             return [self._remember[h] for h in hashes if h in self._remember]
+
+    def pop_remember_token(self, token_hash: str) -> RememberToken | None:
+        with self._lock:
+            record = self._remember.pop(token_hash, None)
+            if record is None:
+                return None
+            bucket = self._remember_by_user.get(record.user_id)
+            if bucket is not None:
+                bucket.discard(token_hash)
+                if not bucket:
+                    self._remember_by_user.pop(record.user_id, None)
+            family = self._remember_families.get(record.family_id)
+            if family is not None:
+                family.discard(token_hash)
+                if not family:
+                    self._remember_families.pop(record.family_id, None)
+            return record
+
+    def mark_remember_token_redeemed(self, token_hash: str, family_id: str) -> None:
+        with self._lock:
+            self._redeemed_tokens[token_hash] = family_id
+
+    def get_redeemed_remember_family(self, token_hash: str) -> str | None:
+        with self._lock:
+            return self._redeemed_tokens.get(token_hash)
+
+    def invalidate_remember_family(self, family_id: str) -> None:
+        with self._lock:
+            for token_hash in list(self._remember_families.pop(family_id, ())):
+                record = self._remember.pop(token_hash, None)
+                if record is None:
+                    continue
+                bucket = self._remember_by_user.get(record.user_id)
+                if bucket is not None:
+                    bucket.discard(token_hash)
+                    if not bucket:
+                        self._remember_by_user.pop(record.user_id, None)
 
     # -- test helpers -----------------------------------------------------
     def clear(self) -> None:
@@ -198,3 +261,5 @@ class MemoryStore:
             self._epochs.clear()
             self._remember.clear()
             self._remember_by_user.clear()
+            self._remember_families.clear()
+            self._redeemed_tokens.clear()

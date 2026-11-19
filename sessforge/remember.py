@@ -57,17 +57,36 @@ class TokenExpired(RememberError):
     """The presented token exists but is past its expiry."""
 
 
+class TokenReplay(RememberError):
+    """The presented token was already redeemed once.
+
+    A replay means the bearer credential leaked: its whole family has been
+    invalidated and the caller must force re-authentication.
+    """
+
+
+def _new_family_id() -> str:
+    return secrets.token_urlsafe(TOKEN_BYTES)
+
+
 def issue(store: SessionStore, user_id: str, now: float) -> IssuedToken:
     """Mint a new remember-me token for ``user_id``."""
+    return _issue(store, user_id, now, family_id=_new_family_id())
+
+
+def _issue(store: SessionStore, user_id: str, now: float, *, family_id: str) -> IssuedToken:
+    """Mint a token belonging to ``family_id``."""
     token = secrets.token_urlsafe(TOKEN_BYTES)
     expires_at = now + REMEMBER_TOKEN_TTL_SECONDS
+    token_hash = _hash(token)
     store.put_remember_token(
-        _hash(token),
+        token_hash,
         RememberToken(
-            token_hash=_hash(token),
+            token_hash=token_hash,
             user_id=user_id,
             issued_at=now,
             expires_at=expires_at,
+            family_id=family_id,
         ),
     )
     return IssuedToken(token=token, user_id=user_id, expires_at=expires_at)
@@ -76,20 +95,28 @@ def issue(store: SessionStore, user_id: str, now: float) -> IssuedToken:
 def redeem(store: SessionStore, token: str, now: float) -> RedeemedToken:
     """Exchange a valid token for a successor.
 
-    Raises :class:`TokenNotFound` when the token is unknown and
-    :class:`TokenExpired` when it is past its expiry.
+    The presented token is consumed atomically: concurrent redemptions of the
+    same value have exactly one winner and every loser is treated as a replay.
+
+    Raises :class:`TokenNotFound` when the token is unknown or its family has
+    been revoked, :class:`TokenReplay` when the token was already redeemed
+    once, and :class:`TokenExpired` when it is past its expiry.
     """
     token_hash = _hash(token)
-    record = store.get_remember_token(token_hash)
+    record = store.pop_remember_token(token_hash)
     if record is None:
+        family_id = store.get_redeemed_remember_family(token_hash)
+        if family_id is not None:
+            store.invalidate_remember_family(family_id)
+            raise TokenReplay(token_hash)
         raise TokenNotFound(token_hash)
 
-    store.delete_remember_token(token_hash)
-
     if now > record.expires_at:
+        store.mark_remember_token_redeemed(token_hash, record.family_id)
         raise TokenExpired(token_hash)
 
-    successor = issue(store, record.user_id, now)
+    store.mark_remember_token_redeemed(token_hash, record.family_id)
+    successor = _issue(store, record.user_id, now, family_id=record.family_id)
     return RedeemedToken(
         token=successor.token,
         user_id=successor.user_id,

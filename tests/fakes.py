@@ -85,6 +85,8 @@ class RedisSessionStore(SessionStore):
 
     def put_remember_token(self, token_hash: str, record: RememberToken) -> None:
         self._client.hset(f"rt:{token_hash}", "record", record)
+        if record.family_id:
+            self._client.hset(f"rt-family:{record.family_id}", token_hash, 1)
 
     def get_remember_token(self, token_hash: str) -> RememberToken | None:
         value = self._client.hget(f"rt:{token_hash}", "record")
@@ -100,3 +102,25 @@ class RedisSessionStore(SessionStore):
             if isinstance(value, RememberToken) and value.user_id == user_id:
                 out.append(value)
         return out
+
+    def pop_remember_token(self, token_hash: str) -> RememberToken | None:
+        key = f"rt:{token_hash}"
+        value = self._client.hget(key, "record")
+        if not isinstance(value, RememberToken):
+            return None
+        self._client.hdel(key, "record")
+        self._client.hdel(f"rt-family:{value.family_id}", token_hash)
+        return value
+
+    def mark_remember_token_redeemed(self, token_hash: str, family_id: str) -> None:
+        self._client.hset("rt:redeemed", token_hash, family_id)
+
+    def get_redeemed_remember_family(self, token_hash: str) -> str | None:
+        value = self._client.hget("rt:redeemed", token_hash)
+        return value if isinstance(value, str) else None
+
+    def invalidate_remember_family(self, family_id: str) -> None:
+        members = self._client.hgetall(f"rt-family:{family_id}")
+        for token_hash in list(members):
+            self._client.hdel(f"rt:{token_hash}", "record")
+            self._client.hdel(f"rt-family:{family_id}", token_hash)

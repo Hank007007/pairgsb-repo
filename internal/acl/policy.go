@@ -54,8 +54,14 @@ type accessFile struct {
 
 // Policy is a loaded access file, indexed by caller uid and by pattern.
 type Policy struct {
-	byUID map[int]map[string]*Rule
+	byUID map[int][]*patternRule
 	rules []*Rule
+}
+
+// patternRule pairs a rule with one of the patterns that selects it.
+type patternRule struct {
+	pattern string
+	rule    *Rule
 }
 
 // Parse reads an access file from r.
@@ -90,7 +96,7 @@ func LoadFile(name string) (*Policy, error) {
 
 func newPolicy(rules []*Rule) (*Policy, error) {
 	p := &Policy{
-		byUID: make(map[int]map[string]*Rule),
+		byUID: make(map[int][]*patternRule),
 		rules: make([]*Rule, 0, len(rules)),
 	}
 	for i, rule := range rules {
@@ -115,16 +121,14 @@ func newPolicy(rules []*Rule) (*Policy, error) {
 			return nil, fmt.Errorf("acl: rule %d for uid %d mixes deny with other ops", i, rule.UID)
 		}
 
-		patterns := p.byUID[rule.UID]
-		if patterns == nil {
-			patterns = make(map[string]*Rule)
-			p.byUID[rule.UID] = patterns
-		}
 		for _, pattern := range rule.Paths {
 			if err := ValidPattern(pattern); err != nil {
 				return nil, fmt.Errorf("acl: rule %d for uid %d: %q: %w", i, rule.UID, pattern, err)
 			}
-			patterns[pattern] = rule
+			p.byUID[rule.UID] = append(p.byUID[rule.UID], &patternRule{
+				pattern: Clean(pattern),
+				rule:    rule,
+			})
 		}
 		p.rules = append(p.rules, rule)
 	}

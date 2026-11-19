@@ -4,18 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"filesentry/internal/wire"
 )
-
-// withinRoot reports whether p is root itself or lies below it.
-func withinRoot(root, p string) bool {
-	root = filepath.Clean(root)
-	p = filepath.Clean(p)
-
-	return strings.HasPrefix(p, root)
-}
 
 // describe builds a list entry for name inside dir.
 func describe(dir, name string) (wire.Entry, error) {

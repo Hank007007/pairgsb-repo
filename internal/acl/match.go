@@ -42,6 +42,12 @@ func ValidPattern(pattern string) error {
 		if seg == "." || seg == ".." {
 			return ErrInvalidPattern
 		}
+		if seg == "**" {
+			continue
+		}
+		if strings.Contains(seg, "**") || strings.ContainsAny(seg, "?[") {
+			return ErrInvalidPattern
+		}
 	}
 	return nil
 }
@@ -50,39 +56,122 @@ func ValidPattern(pattern string) error {
 // the directory a rule speaks about, with any wildcard and everything below it
 // removed.
 func PatternRoot(pattern string) string {
-	p := Clean(pattern)
-	p = strings.TrimSuffix(p, "/**")
-	p = strings.TrimSuffix(p, "/*")
-
-	segs := strings.Split(p, "/")
-	literal := make([]string, 0, len(segs))
-	for _, seg := range segs {
+	literal := make([]string, 0)
+	for _, seg := range pathSegments(Clean(pattern)) {
 		if strings.ContainsAny(seg, "*?[") {
 			break
 		}
 		literal = append(literal, seg)
 	}
-	root := strings.Join(literal, "/")
-	if root == "" {
+	volume := filepath.VolumeName(pattern)
+	if volume != "" {
+		// Windows drive root, e.g. C:/a/b -> C:/a/b; no further literals -> C:/.
+		if len(literal) == 0 {
+			return volume + "/"
+		}
+		return volume + "/" + strings.Join(literal[1:], "/")
+	}
+	if len(literal) == 0 {
 		return "/"
 	}
-	return root
+	return "/" + strings.Join(literal, "/")
 }
 
 // matchPath reports whether pattern selects target.
 func matchPath(pattern, target string) bool {
-	p := Clean(pattern)
-	t := Clean(target)
+	psegs := pathSegments(Clean(pattern))
+	tsegs := pathSegments(Clean(target))
 
-	p = strings.TrimSuffix(p, "/**")
-
-	if i := strings.IndexByte(p, '*'); i >= 0 {
-		parts := strings.Split(p, "*")
-		if !strings.HasPrefix(t, parts[0]) {
-			return false
-		}
-		return strings.HasSuffix(t, parts[len(parts)-1])
+	// A pattern ending in a literal segment names both that directory and
+	// everything beneath it, equivalent to appending "/**".
+	if len(psegs) == 0 {
+		psegs = append(psegs, "**")
+	} else if last := psegs[len(psegs)-1]; !strings.Contains(last, "*") {
+		psegs = append(psegs, "**")
 	}
 
-	return strings.HasPrefix(t, p)
+	return matchSegments(psegs, tsegs)
+}
+
+// pathSegments splits a cleaned absolute path into its non-empty segments.
+func pathSegments(p string) []string {
+	volume := filepath.VolumeName(p)
+	rest := p[len(volume):]
+	segs := make([]string, 0)
+	if volume != "" {
+		segs = append(segs, strings.TrimSuffix(volume, string(filepath.Separator)))
+	}
+	for _, seg := range strings.Split(rest, "/") {
+		if seg != "" {
+			segs = append(segs, seg)
+		}
+	}
+	return segs
+}
+
+// segmentCount counts the non-empty segments of a cleaned absolute path.
+func segmentCount(p string) int {
+	return len(pathSegments(Clean(p)))
+}
+
+// matchSegments matches pattern segments against target segments. "*" stands
+// for exactly one segment (which may be empty) and "**" for zero or more.
+func matchSegments(pattern, target []string) bool {
+	for len(pattern) > 0 {
+		seg := pattern[0]
+		if seg == "**" {
+			if len(pattern) == 1 {
+				return true
+			}
+			for skip := 0; skip <= len(target); skip++ {
+				if matchSegments(pattern[1:], target[skip:]) {
+					return true
+				}
+			}
+			return false
+		}
+		if len(target) == 0 {
+			// A lone "*" may match an empty segment; nothing else can.
+			if seg == "*" {
+				pattern = pattern[1:]
+				continue
+			}
+			return false
+		}
+		if !matchSegment(seg, target[0]) {
+			return false
+		}
+		pattern = pattern[1:]
+		target = target[1:]
+	}
+	return len(target) == 0
+}
+
+// matchSegment matches a single segment, where "*" is a wildcard for any run
+// of characters within that segment. Matching never crosses a slash.
+func matchSegment(pattern, name string) bool {
+	if pattern == "*" {
+		return true
+	}
+	if !strings.Contains(pattern, "*") {
+		return pattern == name
+	}
+
+	parts := strings.Split(pattern, "*")
+	if !strings.HasPrefix(name, parts[0]) {
+		return false
+	}
+	if !strings.HasSuffix(name, parts[len(parts)-1]) {
+		return false
+	}
+
+	rest := name[len(parts[0]) : len(name)-len(parts[len(parts)-1])]
+	for _, part := range parts[1 : len(parts)-1] {
+		idx := strings.Index(rest, part)
+		if idx < 0 {
+			return false
+		}
+		rest = rest[idx+len(part):]
+	}
+	return true
 }

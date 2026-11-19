@@ -66,7 +66,7 @@ func (h *Handler) serve(c net.Conn) *wire.Response {
 	}
 
 	if req.Op == wire.OpChown {
-		return h.Chown(uid, req)
+		return h.Chown(uid, target, req)
 	}
 
 	switch req.Op {
@@ -77,20 +77,25 @@ func (h *Handler) serve(c net.Conn) *wire.Response {
 		}
 
 		flag := os.O_RDONLY
+		var perm os.FileMode
 		if req.Op == wire.OpWrite {
-			flag = os.O_WRONLY
+			flag = os.O_WRONLY | os.O_CREATE
+			perm = os.FileMode(req.Mode) & 0o777
 		}
 
-		file, err := h.resolve(target, pattern, flag)
+		opened, err := resolveFile(target, acl.PatternRoot(pattern), flag, perm)
 		if err != nil {
 			return reject(reasonFor(err), err)
 		}
-		defer file.Close()
+		defer opened.file.Close()
 
 		if req.Op == wire.OpRead {
-			return h.read(file)
+			if err := requireRegular(opened.file); err != nil {
+				return reject(reasonFor(err), err)
+			}
+			return h.read(opened.file)
 		}
-		return h.write(file, req)
+		return h.write(opened.file, req)
 
 	case wire.OpList:
 		rule, pattern, ok := h.Policy.SelectRule(uid, target)
@@ -98,50 +103,34 @@ func (h *Handler) serve(c net.Conn) *wire.Response {
 			return reject(wire.ReasonDenied, fmt.Errorf("uid %d may not %s %s", uid, req.Op, target))
 		}
 
-		dir, err := h.resolveDir(target, pattern)
+		opened, err := resolveDirectory(target, acl.PatternRoot(pattern))
 		if err != nil {
 			return reject(reasonFor(err), err)
 		}
-		defer dir.Close()
-		return h.list(dir)
+		defer opened.file.Close()
+
+		if fi, statErr := opened.file.Stat(); statErr != nil {
+			return reject(wire.ReasonIOError, statErr)
+		} else if !fi.IsDir() {
+			return reject(reasonFor(errNotDirectory), errNotDirectory)
+		}
+		return h.list(opened.file)
 
 	default:
 		return reject(wire.ReasonInvalidRequest, fmt.Errorf("unknown op %q", req.Op))
 	}
 }
 
-// resolve opens target for the pattern that authorised it.
-func (h *Handler) resolve(target, pattern string, flag int) (*os.File, error) {
-	root := acl.PatternRoot(pattern)
-
-	fi, err := os.Stat(target)
+// requireRegular verifies that an opened read target is a regular file.
+func requireRegular(f *os.File) error {
+	fi, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if !withinRoot(root, target) {
-		return nil, errPathEscape
+	if fi.IsDir() || !fi.Mode().IsRegular() {
+		return errNotRegular
 	}
-	if fi.IsDir() {
-		return nil, errNotRegular
-	}
-	return os.OpenFile(target, flag, 0)
-}
-
-// resolveDir opens target as a directory for the pattern that authorised it.
-func (h *Handler) resolveDir(target, pattern string) (*os.File, error) {
-	root := acl.PatternRoot(pattern)
-
-	fi, err := os.Stat(target)
-	if err != nil {
-		return nil, err
-	}
-	if !withinRoot(root, target) {
-		return nil, errPathEscape
-	}
-	if !fi.IsDir() {
-		return nil, errNotDirectory
-	}
-	return os.Open(target)
+	return nil
 }
 
 func (h *Handler) read(f *os.File) *wire.Response {

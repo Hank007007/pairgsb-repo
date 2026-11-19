@@ -1,5 +1,10 @@
 function cacheKey(request) {
-  return `${request.principal}\u0000${request.action}`;
+  return JSON.stringify([
+    request.principal,
+    request.resource,
+    request.action,
+    request.context ?? null,
+  ]);
 }
 
 /**

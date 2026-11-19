@@ -1,25 +1,72 @@
 const OPERATORS = new Set(['eq', 'ne', 'lt', 'lte', 'gt', 'gte', 'in']);
 
-function asComparable(value) {
-  return typeof value === 'string' ? value : value.toString();
+function isMissing(context, key) {
+  return !Object.prototype.hasOwnProperty.call(context, key);
+}
+
+function isNumeric(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value);
+  }
+  return (
+    typeof value === 'string' &&
+    value.trim() !== '' &&
+    Number.isFinite(Number(value))
+  );
+}
+
+function looseEqual(actual, expected) {
+  if (isNumeric(actual) && isNumeric(expected)) {
+    return Number(actual) === Number(expected);
+  }
+  return actual === expected;
+}
+
+function compareOrdering(actual, expected) {
+  if (isNumeric(actual) && isNumeric(expected)) {
+    const left = Number(actual);
+    const right = Number(expected);
+    return left < right ? -1 : left > right ? 1 : 0;
+  }
+
+  if (typeof actual === 'string' && typeof expected === 'string') {
+    return actual < expected ? -1 : actual > expected ? 1 : 0;
+  }
+
+  if (typeof actual === 'boolean' && typeof expected === 'boolean') {
+    const left = actual ? 1 : 0;
+    const right = expected ? 1 : 0;
+    return left < right ? -1 : left > right ? 1 : 0;
+  }
+
+  return null;
 }
 
 function compare(operator, actual, expected) {
+  if (operator === 'eq') {
+    return looseEqual(actual, expected);
+  }
+  if (operator === 'ne') {
+    return !looseEqual(actual, expected);
+  }
+  if (operator === 'in') {
+    return Array.isArray(expected) && expected.some((entry) => looseEqual(actual, entry));
+  }
+
+  const ordering = compareOrdering(actual, expected);
+  if (ordering === null) {
+    return false;
+  }
+
   switch (operator) {
-    case 'eq':
-      return actual === asComparable(expected);
-    case 'ne':
-      return actual !== asComparable(expected);
     case 'lt':
-      return actual < asComparable(expected);
+      return ordering < 0;
     case 'lte':
-      return actual <= asComparable(expected);
+      return ordering <= 0;
     case 'gt':
-      return actual > asComparable(expected);
+      return ordering > 0;
     case 'gte':
-      return actual >= asComparable(expected);
-    case 'in':
-      return Array.isArray(expected) && expected.map(asComparable).includes(actual);
+      return ordering >= 0;
     default:
       return false;
   }
@@ -39,10 +86,16 @@ export function evaluate(condition, context) {
   if (condition === undefined || condition === null) {
     return true;
   }
+  if (context === undefined || context === null) {
+    context = {};
+  }
 
   for (const [key, spec] of Object.entries(condition)) {
-    const raw = context[key];
-    const actual = asComparable(raw);
+    if (isMissing(context, key)) {
+      return false;
+    }
+
+    const actual = context[key];
 
     if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) {
       if (!compare('eq', actual, spec)) {

@@ -77,8 +77,8 @@ export function normalizeRule(raw, { source = 'policy' } = {}) {
   }
 
   const id = requireText(raw.id, 'id', source);
-  const principal = requireText(raw.principal, 'principal', source);
-  const resource = requireText(raw.resource, 'resource', source);
+  const principal = requireText(raw.principal, 'principal', `${source} (${id})`);
+  const resource = requireText(raw.resource, 'resource', `${source} (${id})`);
 
   if (!Array.isArray(raw.action) || raw.action.length === 0) {
     throw new PolicyFormatError(`${source} (${id}): field "action" must be a non-empty array`);
@@ -111,8 +111,12 @@ export function normalizeRule(raw, { source = 'policy' } = {}) {
  * @returns {ReadonlyArray<Readonly<object>>}
  */
 export function normalizeRules(rawRules, { source = 'policy' } = {}) {
+  if (isPlainObject(rawRules) && Array.isArray(rawRules.rules)) {
+    rawRules = rawRules.rules;
+  }
+
   if (!Array.isArray(rawRules)) {
-    throw new PolicyFormatError(`${source}: rule set must be an array`);
+    throw new PolicyFormatError(`${source}: rule set must be an array or an object with a "rules" array`);
   }
 
   const seen = new Set();

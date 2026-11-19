@@ -84,7 +84,17 @@ export class PolicyEngine {
    * @returns {string[]}
    */
   candidates(resource) {
-    return [normalizeResource(resource)];
+    const path = normalizeResource(resource);
+    if (path === '/') {
+      return ['/'];
+    }
+
+    const segments = path.slice(1).split('/');
+    const candidates = [];
+    for (let length = segments.length; length >= 1; length -= 1) {
+      candidates.push(`/${segments.slice(0, length).join('/')}`);
+    }
+    return candidates;
   }
 
   #matchesResource(entry, resource) {
@@ -104,6 +114,8 @@ export class PolicyEngine {
    */
   decide(request) {
     const { principal, resource, action, context } = readRequest(request);
+
+    let permitted = null;
 
     for (const entry of this.#compiled) {
       const { rule } = entry;
@@ -129,15 +141,21 @@ export class PolicyEngine {
         };
       }
 
+      if (permitted === null) {
+        permitted = rule;
+      }
+    }
+
+    if (permitted !== null) {
       return {
         allow: true,
-        matchedPolicy: rule.id,
-        reason: `matched permit rule ${rule.id}`,
+        matchedPolicy: permitted.id,
+        reason: `matched permit rule ${permitted.id}`,
       };
     }
 
     return {
-      allow: true,
+      allow: false,
       matchedPolicy: null,
       reason: 'no matching policy',
     };

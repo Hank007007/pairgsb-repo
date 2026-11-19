@@ -84,16 +84,30 @@ func (s *PolicySet) Check(peer, method string) error {
 		return ErrNoMatch
 	}
 
+	denied := false
+	permitted := false
 	for _, rule := range s.Rules {
 		if !Allow(peer, method, rule) {
 			continue
 		}
-		if rule.Effect == EffectPermit {
-			return nil
+		switch rule.Effect {
+		case EffectDeny:
+			denied = true
+		case EffectPermit:
+			permitted = true
 		}
+	}
+
+	// The whole rule set is evaluated before a decision is made, so the
+	// outcome is independent of map iteration order: any matching deny wins
+	// over every matching permit.
+	if denied {
 		return ErrDenied
 	}
-	return ErrDenied
+	if permitted {
+		return nil
+	}
+	return ErrNoMatch
 }
 
 // RulesFor returns the rules that name the given peer, in no particular order.

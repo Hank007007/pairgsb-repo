@@ -52,8 +52,16 @@ func unaryCall(ctx context.Context, az Authorizer, method string, h HandlerFunc,
 	return h(ctx, req)
 }
 
-// streamCall is the streaming pipeline. The stream is established before the
-// handler is invoked.
+// streamCall is the streaming pipeline. Identity and authorization are
+// enforced before the stream handler runs, using the exact same checks as the
+// unary path; a rejected peer never establishes the stream.
 func streamCall(ctx context.Context, az Authorizer, method string, h StreamHandler, recv func() ([]byte, error), send func([]byte) error) error {
+	id, ok := PeerFromContext(ctx)
+	if !ok || id.IsZero() {
+		return ErrUnauthenticated
+	}
+	if err := az.Check(id.Service, method); err != nil {
+		return ErrPermissionDenied
+	}
 	return h(ctx, recv, send)
 }

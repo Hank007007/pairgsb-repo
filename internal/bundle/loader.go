@@ -211,6 +211,23 @@ func (b *Bundle) Verify(rawChains [][]byte, now time.Time) ([][]*x509.Certificat
 	return nil, lastErr
 }
 
+// VerifyPeer implements server.PeerVerifier. It runs the peer chain through
+// the verifiable epochs only, so certificates issued under a retired epoch or
+// by an unregistered CA fail while the handshake is still in progress.
+func (b *Bundle) VerifyPeer(rawChains [][]byte) error {
+	if len(rawChains) == 0 {
+		return errors.New("bundle: peer presented no certificate")
+	}
+	chains, err := b.Verify(rawChains, time.Now())
+	if err != nil {
+		return err
+	}
+	if len(chains) == 0 {
+		return errors.New("bundle: peer certificate chain did not verify")
+	}
+	return nil
+}
+
 func loadEpoch(dir, id string) (*Epoch, error) {
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {

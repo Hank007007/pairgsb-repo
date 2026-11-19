@@ -14,10 +14,11 @@ func Union(creds ...Credential) []string {
 	set := make(map[string]struct{})
 	for _, cred := range creds {
 		for _, scope := range cred.Scopes {
-			if scope == "" {
+			canonical := lowerScope(scope)
+			if canonical == "" {
 				continue
 			}
-			set[scope] = struct{}{}
+			set[canonical] = struct{}{}
 		}
 	}
 
@@ -35,7 +36,17 @@ func FilterSpecialScopes(scopes []string, creds ...Credential) []string {
 	contributors := 0
 	onlyKind := Kind("")
 	for _, cred := range creds {
-		if cred.Kind == KindAnonymous || len(cred.Scopes) == 0 {
+		if cred.Kind == KindAnonymous {
+			continue
+		}
+		hasScope := false
+		for _, scope := range cred.Scopes {
+			if lowerScope(scope) != "" {
+				hasScope = true
+				break
+			}
+		}
+		if !hasScope {
 			continue
 		}
 		contributors++
@@ -44,11 +55,32 @@ func FilterSpecialScopes(scopes []string, creds ...Credential) []string {
 
 	keepOffline := contributors == 1 && onlyKind == KindOIDCAccessToken
 
-	out := make([]string, 0, len(scopes))
+	set := make(map[string]struct{}, len(scopes))
 	for _, scope := range scopes {
-		if lowerScope(scope) == OfflineAccess && !keepOffline {
+		canonical := lowerScope(scope)
+		if canonical == "" {
 			continue
 		}
+		set[canonical] = struct{}{}
+	}
+	if !keepOffline {
+		delete(set, OfflineAccess)
+	}
+
+	conflicts := [][2]string{
+		{"docs:write", "docs:read"},
+		{"admin", "readonly"},
+		{"session:persistent", "session:ephemeral"},
+	}
+	for _, pair := range conflicts {
+		keeper, discarded := pair[0], pair[1]
+		if _, keeperPresent := set[keeper]; keeperPresent {
+			delete(set, discarded)
+		}
+	}
+
+	out := make([]string, 0, len(set))
+	for scope := range set {
 		out = append(out, scope)
 	}
 	sort.Strings(out)

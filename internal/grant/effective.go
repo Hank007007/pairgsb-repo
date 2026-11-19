@@ -32,44 +32,58 @@ func Compute(req Request) EffectiveGrant {
 		now = time.Now()
 	}
 
-	live := make([]Credential, 0, len(req.Creds))
-	for _, cred := range req.Creds {
+	type liveCredential struct {
+		index int
+		cred  Credential
+	}
+
+	live := make([]liveCredential, 0, len(req.Creds))
+	for i, cred := range req.Creds {
 		if cred.Kind == KindAnonymous {
 			continue
 		}
 		if !WithinSkew(cred.Kind, now, cred.ExpiresAt) {
 			continue
 		}
-		live = append(live, cred)
+		live = append(live, liveCredential{index: i, cred: cred})
 	}
 
 	// Index what each subject holds, so delegated credentials can be checked
 	// against their delegator.
 	held := make(map[string]Credential, len(live))
 	effective := make([]Credential, 0, len(live))
-	for _, cred := range live {
+	subject := ""
+	hasSubject := false
+	for _, entry := range live {
+		cred := entry.cred
 		if cred.Kind == KindDelegated {
 			continue
 		}
 		held[cred.Subject] = mergeInto(held[cred.Subject], cred)
 		effective = append(effective, cred)
+		if !hasSubject {
+			subject = cred.Subject
+			hasSubject = true
+		}
 	}
 
 	// Delegation chains are resolved in rounds: a delegated credential becomes
 	// usable once its delegator has been resolved.
-	pending := make([]Credential, 0, len(live))
-	for _, cred := range live {
-		if cred.Kind == KindDelegated {
-			pending = append(pending, cred)
+	pending := make([]liveCredential, 0, len(live))
+	for _, entry := range live {
+		if entry.cred.Kind == KindDelegated {
+			pending = append(pending, entry)
 		}
 	}
+	acceptedDelegated := make([]bool, len(req.Creds))
 	for progress := true; progress && len(pending) > 0; {
 		progress = false
 		remaining := pending[:0]
-		for _, del := range pending {
+		for _, entry := range pending {
+			del := entry.cred
 			delegator, ok := held[del.Delegator]
 			if !ok {
-				remaining = append(remaining, del)
+				remaining = append(remaining, entry)
 				continue
 			}
 			narrowed, ok := NarrowDelegated(del, delegator)
@@ -79,19 +93,25 @@ func Compute(req Request) EffectiveGrant {
 			}
 			held[del.Subject] = mergeInto(held[del.Subject], narrowed)
 			effective = append(effective, narrowed)
+			acceptedDelegated[entry.index] = true
 			progress = true
 		}
 		pending = remaining
 	}
 
+	if !hasSubject {
+		for _, entry := range live {
+			if entry.cred.Kind == KindDelegated && acceptedDelegated[entry.index] {
+				subject = entry.cred.Subject
+				break
+			}
+		}
+	}
+
 	scopes := FilterSpecialScopes(Union(effective...), effective...)
 	roles := MergeRoles(effective...)
 
-	grant := EffectiveGrant{Scopes: scopes, Roles: roles}
-	if len(effective) > 0 {
-		grant.Subject = effective[0].Subject
-	}
-	return grant
+	return EffectiveGrant{Subject: subject, Scopes: scopes, Roles: roles}
 }
 
 func mergeInto(dst, src Credential) Credential {

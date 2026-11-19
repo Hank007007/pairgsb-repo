@@ -8,6 +8,19 @@ func WithinSkew(kind Kind, now, expiresAt time.Time) bool {
 	if expiresAt.IsZero() {
 		return true
 	}
-	skew := 5 * time.Minute
-	return now.Before(expiresAt.Add(skew))
+	skew := skewFor(kind)
+	return !now.After(expiresAt.Add(skew))
+}
+
+func skewFor(kind Kind) time.Duration {
+	switch kind {
+	case KindOIDCAccessToken:
+		return 120 * time.Second
+	case KindDelegated:
+		return 60 * time.Second
+	case KindServiceAccount:
+		return 30 * time.Second
+	default:
+		return 0
+	}
 }

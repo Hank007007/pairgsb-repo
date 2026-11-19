@@ -18,7 +18,7 @@ CACHE_CAPACITY = 256
 def cache_key(pattern: str, flags: int = 0) -> tuple[str, int]:
     """Key under which a compiled pattern is stored."""
 
-    return (pattern,)
+    return (pattern, effective_flags(flags))
 
 
 class CompiledPatternCache:

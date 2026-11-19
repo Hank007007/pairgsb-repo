@@ -60,11 +60,11 @@ class PatternCheck:
                 "pattern is on the watchlist after an earlier budget overrun",
             )
 
-        length_code, detail = check_length(pattern, flags)
-        if length_code is not ErrorCode.OK:
-            return failure(length_code, detail)
-
         normalized = normalize(pattern, flags)
+
+        length_code, detail = check_length(normalized)
+        if length_code is not ErrorCode.OK:
+            return failure(length_code, detail, normalized)
 
         syntax = scan(normalized)
         if not syntax.ok:

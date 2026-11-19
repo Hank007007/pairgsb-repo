@@ -30,10 +30,11 @@ class Sequence(Node):
 
 
 class Alternation(Node):
-    __slots__ = ("branches",)
+    __slots__ = ("branches", "offset")
 
-    def __init__(self, branches: tuple[Node, ...]) -> None:
+    def __init__(self, branches: tuple[Node, ...], offset: int = 0) -> None:
         self.branches = branches
+        self.offset = offset
 
 
 class Literal(Node):
@@ -71,7 +72,7 @@ class Group(Node):
 
 
 class Repeat(Node):
-    __slots__ = ("body", "minimum", "maximum", "operator", "lazy")
+    __slots__ = ("body", "minimum", "maximum", "operator", "lazy", "offset")
 
     def __init__(
         self,
@@ -80,12 +81,14 @@ class Repeat(Node):
         maximum: int | None,
         operator: str,
         lazy: bool,
+        offset: int = 0,
     ) -> None:
         self.body = body
         self.minimum = minimum
         self.maximum = maximum
         self.operator = operator
         self.lazy = lazy
+        self.offset = offset
 
 
 @dataclass(frozen=True)
@@ -123,13 +126,14 @@ class _Parser:
         return node
 
     def _alternation(self) -> Node:
+        start = self.index
         branches = [self._sequence()]
         while self._peek() == "|":
             self.index += 1
             branches.append(self._sequence())
         if len(branches) == 1:
             return branches[0]
-        return Alternation(tuple(branches))
+        return Alternation(tuple(branches), start)
 
     def _sequence(self) -> Node:
         items: list[Node] = []
@@ -141,6 +145,7 @@ class _Parser:
         return Sequence(tuple(items))
 
     def _quantified(self) -> Node:
+        start = self.index
         atom = self._atom()
         char = self._peek()
         if char in _SIMPLE_QUANTIFIERS:
@@ -165,7 +170,7 @@ class _Parser:
         if self._peek() == "?":
             lazy = True
             self.index += 1
-        return Repeat(atom, minimum, maximum, operator, lazy)
+        return Repeat(atom, minimum, maximum, operator, lazy, start)
 
     def _atom(self) -> Node:
         char = self._peek()
@@ -295,8 +300,257 @@ def walk(node: Node):
         yield from walk(node.body)
 
 
-def _unbounded_quantifier(node: Repeat) -> bool:
-    return node.maximum is None
+# Product of bounded repeat counts along one root-to-leaf path at which the
+# policy declares the pattern high risk (2^16).
+_PRODUCT_LIMIT = 1 << 16
+
+# Tokens for the predefined character classes, used as first-set atoms.
+_CLASS_TOKENS = frozenset("dDsSwW")
+
+# Class tokens that match (nearly) anything; they overlap every other atom.
+_OPEN_TOKENS = frozenset({"DOT", "NEG", "ANY"})
+
+_NEGATED_TOKEN = {"d": "D", "D": "d", "s": "S", "S": "s", "w": "W", "W": "w"}
+
+# Pairs of positive class tokens whose character sets are disjoint.
+_DISJOINT_CLASSES = {frozenset(pair) for pair in (("d", "s"), ("w", "s"))}
+
+_CLASS_SIMPLE_ESCAPES = {
+    "a": "\a",
+    "f": "\f",
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "v": "\v",
+}
+
+
+def _is_repeat_node(node: Node) -> bool:
+    """Whether ``node`` is a quantifier the policy counts as a repeat."""
+
+    return isinstance(node, Repeat) and (node.maximum is None or node.maximum >= 2)
+
+
+def _children(node: Node) -> tuple[Node, ...]:
+    if isinstance(node, Sequence):
+        return node.items
+    if isinstance(node, Alternation):
+        return node.branches
+    if isinstance(node, (Group, Repeat)):
+        return (node.body,)
+    return ()
+
+
+def _nullable(node: Node | None) -> bool:
+    """Whether ``node`` can match the empty string."""
+
+    if node is None or isinstance(node, Anchor):
+        return True
+    if isinstance(node, (Literal, CharClass, Dot)):
+        return False
+    if isinstance(node, Sequence):
+        return all(_nullable(item) for item in node.items)
+    if isinstance(node, Alternation):
+        return any(_nullable(branch) for branch in node.branches)
+    if isinstance(node, Group):
+        return _nullable(node.body)
+    if isinstance(node, Repeat):
+        return node.minimum == 0 or _nullable(node.body)
+    return False
+
+
+def _first_set(node: Node | None) -> frozenset:
+    """Atoms that can start a match of ``node``.
+
+    An atom is either ``("ch", char)`` for a single character or
+    ``("cls", token)`` for a character class token (``d``, ``s``, ``w``,
+    their negations, ``DOT``, ``NEG`` for a negated class and ``ANY`` for a
+    class that could not be expanded exactly).
+    """
+
+    if node is None or isinstance(node, Anchor):
+        return frozenset()
+    if isinstance(node, Literal):
+        text = node.text
+        if text.startswith("\\") and len(text) > 1:
+            return frozenset({("ch", text[1])})
+        return frozenset({("ch", text[0])})
+    if isinstance(node, CharClass):
+        return _class_atoms(node.text)
+    if isinstance(node, Dot):
+        return frozenset({("cls", "DOT")})
+    if isinstance(node, Sequence):
+        atoms: set = set()
+        for item in node.items:
+            atoms |= _first_set(item)
+            if not _nullable(item):
+                break
+        return frozenset(atoms)
+    if isinstance(node, Alternation):
+        atoms = set()
+        for branch in node.branches:
+            atoms |= _first_set(branch)
+        return frozenset(atoms)
+    if isinstance(node, (Group, Repeat)):
+        return _first_set(node.body)
+    return frozenset()
+
+
+def _decode_class_escape(body: str, index: int) -> tuple[str, int] | None:
+    nxt = body[index + 1]
+    if nxt in _CLASS_SIMPLE_ESCAPES:
+        return _CLASS_SIMPLE_ESCAPES[nxt], index + 2
+    if nxt in "xuU":
+        width = {"x": 2, "u": 4, "U": 8}[nxt]
+        digits = body[index + 2 : index + 2 + width]
+        if len(digits) != width:
+            return None
+        try:
+            return chr(int(digits, 16)), index + 2 + width
+        except ValueError:
+            return None
+    if nxt.isalnum():
+        return None
+    return nxt, index + 2
+
+
+def _class_atoms(text: str) -> frozenset:
+    """Expand a character class into first-set atoms."""
+
+    if not text.startswith("["):
+        if len(text) == 2 and text[0] == "\\" and text[1] in _CLASS_TOKENS:
+            return frozenset({("cls", text[1])})
+        return frozenset({("cls", "ANY")})
+    body = text[1:]
+    if body.endswith("]"):
+        body = body[:-1]
+    if body.startswith("^"):
+        return frozenset({("cls", "NEG")})
+    atoms: set = set()
+    index = 0
+    end = len(body)
+    while index < end:
+        char = body[index]
+        if char == "\\" and index + 1 < end:
+            if body[index + 1] in _CLASS_TOKENS:
+                atoms.add(("cls", body[index + 1]))
+                index += 2
+                continue
+            decoded = _decode_class_escape(body, index)
+            if decoded is None:
+                return frozenset({("cls", "ANY")})
+            atoms.add(("ch", decoded[0]))
+            index = decoded[1]
+            continue
+        if index + 2 < end and body[index + 1] == "-" and body[index + 2] != "\\":
+            low = ord(char)
+            high = ord(body[index + 2])
+            if high < low or high - low > 256:
+                return frozenset({("cls", "ANY")})
+            for code in range(low, high + 1):
+                atoms.add(("ch", chr(code)))
+            index += 3
+            continue
+        atoms.add(("ch", char))
+        index += 1
+    if not atoms:
+        return frozenset({("cls", "ANY")})
+    return frozenset(atoms)
+
+
+def _char_in_class(char: str, token: str) -> bool:
+    if token in _OPEN_TOKENS:
+        return True
+    if token == "d":
+        return char.isdigit()
+    if token == "w":
+        return char == "_" or char.isalnum()
+    if token == "s":
+        return char.isspace()
+    if token == "D":
+        return not char.isdigit()
+    if token == "W":
+        return not (char == "_" or char.isalnum())
+    if token == "S":
+        return not char.isspace()
+    return True
+
+
+def _classes_overlap(first: str, second: str) -> bool:
+    if first in _OPEN_TOKENS or second in _OPEN_TOKENS:
+        return True
+    if _NEGATED_TOKEN.get(first) == second:
+        return False
+    if frozenset((first, second)) in _DISJOINT_CLASSES:
+        return False
+    return True
+
+
+def _atom_overlap(first: tuple, second: tuple) -> bool:
+    kind_a, value_a = first
+    kind_b, value_b = second
+    if kind_a == "ch" and kind_b == "ch":
+        return value_a == value_b or value_a.casefold() == value_b.casefold()
+    if kind_a == "ch":
+        return _char_in_class(value_a, value_b)
+    if kind_b == "ch":
+        return _char_in_class(value_b, value_a)
+    return _classes_overlap(value_a, value_b)
+
+
+def _branches_overlap(node: Alternation) -> bool:
+    """Whether two branches of ``node`` can start with the same character."""
+
+    branches = node.branches
+    for left in range(len(branches)):
+        for right in range(left + 1, len(branches)):
+            if _nullable(branches[left]) or _nullable(branches[right]):
+                return True
+            first = _first_set(branches[left])
+            second = _first_set(branches[right])
+            if any(_atom_overlap(a, b) for a in first for b in second):
+                return True
+    return False
+
+
+def _assess(node: Node | None, depth: int, product: int, in_repeat: bool) -> Complexity | None:
+    """First policy violation below ``node``, or ``None``.
+
+    ``depth`` counts repeat nodes enclosing ``node``; ``product`` multiplies
+    the finite maxima of those repeats; ``in_repeat`` is true once a repeat
+    node encloses ``node``.
+    """
+
+    if node is None:
+        return None
+    if _is_repeat_node(node):
+        assert isinstance(node, Repeat)
+        depth += 1
+        if node.maximum is not None:
+            product *= node.maximum
+        if depth >= 2:
+            return Complexity(
+                ErrorCode.REPETITION_RISK,
+                f"nested repetition depth {depth} at offset {node.offset}",
+            )
+        if product >= _PRODUCT_LIMIT:
+            return Complexity(
+                ErrorCode.REPETITION_RISK,
+                f"repetition count product {product} reaches {_PRODUCT_LIMIT} "
+                f"at offset {node.offset}",
+            )
+        in_repeat = True
+    if isinstance(node, Alternation) and in_repeat and _branches_overlap(node):
+        return Complexity(
+            ErrorCode.REPETITION_RISK,
+            f"overlapping alternation branches at offset {node.offset} "
+            "inside a repeated group",
+        )
+    for child in _children(node):
+        verdict = _assess(child, depth, product, in_repeat)
+        if verdict is not None:
+            return verdict
+    return None
 
 
 def estimate_complexity(pattern: str) -> Complexity:
@@ -307,18 +561,7 @@ def estimate_complexity(pattern: str) -> Complexity:
     except ParseError as exc:
         return Complexity(ErrorCode.INVALID_SYNTAX, str(exc))
 
-    for node in walk(root):
-        if not isinstance(node, Repeat) or not _unbounded_quantifier(node):
-            continue
-        body = node.body
-        if not isinstance(body, Group):
-            continue
-        inner = body.body
-        if isinstance(inner, Sequence) and len(inner.items) == 1:
-            inner = inner.items[0]
-        if isinstance(inner, CharClass):
-            return Complexity(
-                ErrorCode.REPETITION_RISK,
-                f"character class {inner.text!r} repeated inside a repeated group",
-            )
+    verdict = _assess(root, 0, 1, False)
+    if verdict is not None:
+        return verdict
     return Complexity()

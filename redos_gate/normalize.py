@@ -166,14 +166,18 @@ def normalize(pattern: str, flags: int = 0) -> str:
 def check_length(pattern: str, flags: int = 0) -> tuple[ErrorCode, str]:
     """Apply the length ceiling to ``pattern``.
 
+    The ceiling is measured after the full normalization pipeline, so a
+    pattern that is short as submitted but grows during normalization is
+    rejected as well.
+
     Returns a pair ``(code, detail)``; ``code`` is ``OK`` when the pattern is
     within the ceiling, ``PATTERN_TOO_LONG`` otherwise.
     """
 
-    length = len(pattern)
+    length = len(normalize(pattern, flags))
     if length > MAX_PATTERN_LENGTH:
         return (
             ErrorCode.PATTERN_TOO_LONG,
-            f"pattern length {length} exceeds {MAX_PATTERN_LENGTH}",
+            f"normalized pattern length {length} exceeds {MAX_PATTERN_LENGTH}",
         )
     return ErrorCode.OK, ""

@@ -15,8 +15,10 @@ stored or used for matching:
 4.  **compilation cache** — accepted patterns are compiled once and reused,
     keyed by the text and the flags they were compiled with;
 5.  **matching budget** — one `search_all` call is one request with a single
-    200 ms budget covering every field; a request that uses up the budget is
-    reported as a timeout and the pattern is put on a watchlist.
+    200 ms budget covering every field; matching runs on an engine with a
+    hard per-attempt timeout, and a request that uses up the budget is
+    interrupted, reported as a timeout and the pattern is put on a
+    watchlist.
 
 The normative rules are in [`docs/pattern-policy.md`](docs/pattern-policy.md);
 [`docs/architecture.md`](docs/architecture.md) explains how the stages fit
@@ -24,7 +26,8 @@ together.
 
 ## Requirements
 
-Python 3.11 or newer and `pytest`.  No third-party runtime dependencies.
+Python 3.11 or newer, the [`regex`](https://pypi.org/project/regex/) package
+at runtime, and `pytest` for the test suite.
 
 ## Layout
 

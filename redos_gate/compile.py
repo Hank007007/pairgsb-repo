@@ -24,14 +24,16 @@ def compile_pattern(pattern: str, flags: int = 0) -> re.Pattern[str]:
     """Return a compiled pattern for an accepted pattern string.
 
     The pattern is normalized, checked against the subset and then compiled.
-    The result is memoized in the shared cache.
+    The result is memoized in the shared cache under the normalized pattern
+    and the effective flags.
     """
 
-    cached = get_cached(pattern, flags)
+    normalized = normalize(pattern, flags)
+
+    cached = get_cached(normalized, flags)
     if cached is not None:
         return cached
 
-    normalized = normalize(pattern, flags)
     check = scan(normalized)
     if not check.ok:
         raise CompileError(check.code, check.detail)
@@ -41,5 +43,5 @@ def compile_pattern(pattern: str, flags: int = 0) -> re.Pattern[str]:
     except re.error as exc:
         raise CompileError(ErrorCode.INVALID_SYNTAX, str(exc)) from exc
 
-    store_cached(pattern, flags, compiled)
+    store_cached(normalized, flags, compiled)
     return compiled

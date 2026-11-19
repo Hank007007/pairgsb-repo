@@ -16,10 +16,16 @@ def _load_known():
         text = SCHEMA_PATH.read_text(encoding="utf-8")
     except OSError:
         return names
-    for token in _BACKTICKED.findall(text):
-        token = token.strip()
-        if token:
-            names.add(token.lower())
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("|"):
+            continue
+        first_cell = line.strip("|").split("|")[0].strip()
+        match = _BACKTICKED.fullmatch(first_cell)
+        if match:
+            token = match.group(1).strip()
+            if token:
+                names.add(token.lower())
     return frozenset(names)
 
 

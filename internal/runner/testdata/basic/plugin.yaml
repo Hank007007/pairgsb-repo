@@ -1,0 +1,20 @@
+name: basic
+steps:
+  build:
+    executable: /usr/local/bin/builder
+    args:
+      - --out
+      - ${INPUT_OUT}
+      - --label
+      - ${INPUT_LABEL}
+    env:
+      - CI_STEP_ID=build
+    positionals:
+      - ${INPUT_TARGET}
+  package:
+    executable: /usr/local/bin/packager
+    args:
+      - pack
+      - ${INPUT_ARCHIVE}
+    env:
+      - CI_STEP_ID=package

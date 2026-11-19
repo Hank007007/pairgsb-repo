@@ -1,0 +1,21 @@
+# Build output
+/bin/
+/dist/
+/build/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Local caches and editor state
+/.cache/
+/.tmp/
+/.idea/
+/.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local scratch files produced by workspace tooling
+/.build.*
+

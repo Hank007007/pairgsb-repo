@@ -1,0 +1,8 @@
+name: legacy
+steps:
+  report:
+    executable: /usr/local/bin/reporter
+    args:
+      - report --format=text | tee report.txt
+    env:
+      - CI_STEP_ID=report

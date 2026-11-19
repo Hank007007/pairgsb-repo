@@ -1,0 +1,21 @@
+name: demo
+steps:
+  greet:
+    executable: ./bin/echoargs
+    args:
+      - --mode=greet
+      - --message=${INPUT_GREETING}
+      - --tag=${INPUT_TAG}
+    env:
+      - CI_STEP_ID=greet
+      - LANG=C.UTF-8
+      - RUNNER_TRACE=1
+    positionals:
+      - ${INPUT_BRANCH}
+      - --from-flag
+  legacy-report:
+    executable: ./bin/echoargs
+    args:
+      - echo legacy-report-ok | cat
+    env:
+      - CI_STEP_ID=legacy-report

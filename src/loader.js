@@ -1,9 +1,14 @@
 import { readFileSync } from 'node:fs';
+import { coerceText } from './coerce.js';
 import { CODES, makeError } from './errors.js';
 import { envOverlay } from './env.js';
 import { deepMerge } from './merge.js';
 import { readPath, setPath, splitDottedPath } from './paths.js';
-import { deepClone, isPlainObject } from './util.js';
+import {
+  classifyKey,
+  isPlainObject,
+  sanitizeJson,
+} from './util.js';
 
 function loadLayerFile(filePath, errors) {
   let text;
@@ -25,38 +30,6 @@ function loadLayerFile(filePath, errors) {
     return {};
   }
   return parsed;
-}
-
-function coerceScalar(raw, existing, found) {
-  if (!found) return { ok: true, value: raw };
-  if (typeof existing === 'boolean') {
-    const lowered = raw.trim().toLowerCase();
-    if (lowered === 'true') return { ok: true, value: true };
-    if (lowered === 'false') return { ok: true, value: false };
-    return { ok: false };
-  }
-  if (typeof existing === 'number') {
-    if (raw.trim() === '') return { ok: false };
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) return { ok: false };
-    return { ok: true, value: parsed };
-  }
-  if (Array.isArray(existing)) {
-    const elementType = existing.length > 0 ? typeof existing[0] : 'string';
-    if (elementType === 'number') {
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed)) return { ok: false };
-      return { ok: true, value: parsed, append: true };
-    }
-    if (elementType === 'boolean') {
-      const lowered = raw.trim().toLowerCase();
-      if (lowered === 'true') return { ok: true, value: true, append: true };
-      if (lowered === 'false') return { ok: true, value: false, append: true };
-      return { ok: false };
-    }
-    return { ok: true, value: raw, append: true };
-  }
-  return { ok: true, value: raw };
 }
 
 function applySetFlags(config, argv, errors) {
@@ -89,8 +62,23 @@ function applySetFlags(config, argv, errors) {
       continue;
     }
 
+    let rejected = false;
+    for (const segment of segments) {
+      const classification = classifyKey(segment);
+      if (!classification.ok) {
+        errors.push(makeError(
+          classification.code,
+          pathText,
+          `key ${JSON.stringify(segment)} is not allowed`,
+        ));
+        rejected = true;
+        break;
+      }
+    }
+    if (rejected) continue;
+
     const existing = readPath(config, segments);
-    const coerced = coerceScalar(raw, existing.value, existing.found);
+    const coerced = coerceText(raw, existing.value, existing.found);
     if (!coerced.ok) {
       errors.push(makeError(CODES.TYPE, pathText, 'value does not match the existing type'));
       continue;
@@ -101,6 +89,15 @@ function applySetFlags(config, argv, errors) {
       setPath(config, pathText, coerced.value);
     }
   }
+}
+
+function initialDocument(defaults, errors) {
+  if (!isPlainObject(defaults)) {
+    errors.push(makeError(CODES.TYPE, '', 'defaults must be a plain object'));
+    return {};
+  }
+  const clean = sanitizeJson(defaults, { errors, path: '', style: 'dotted' });
+  return clean.ok ? clean.value : {};
 }
 
 /**
@@ -124,16 +121,24 @@ export function load(options = {}) {
   } = options;
 
   const errors = [];
-  const config = deepClone(defaults);
+  const config = initialDocument(defaults, errors);
 
   if (layers.length > 0) {
-    deepMerge(config, loadLayerFile(layers[0], errors));
+    deepMerge(config, loadLayerFile(layers[0], errors), {
+      errors,
+      path: '',
+      style: 'dotted',
+    });
     for (let index = 1; index < layers.length; index += 1) {
-      deepMerge(config, loadLayerFile(layers[index], errors));
+      deepMerge(config, loadLayerFile(layers[index], errors), {
+        errors,
+        path: '',
+        style: 'dotted',
+      });
     }
   }
 
-  envOverlay(config, env, { prefix });
+  envOverlay(config, env, { prefix, errors });
   applySetFlags(config, argv, errors);
 
   return { config, errors };

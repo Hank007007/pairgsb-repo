@@ -2,6 +2,10 @@
  * Dotted path syntax shared by `--set` and by the environment overlay.
  */
 
+import { defineValue, isPlainObject } from './util.js';
+
+const hasOwn = (target, key) => Object.prototype.hasOwnProperty.call(target, key);
+
 export function splitDottedPath(pathText) {
   return String(pathText).split('.');
 }
@@ -34,13 +38,13 @@ export function setPath(target, pathText, value) {
   let cursor = target;
   for (let index = 0; index < segments.length - 1; index += 1) {
     const key = segments[index];
-    const next = cursor[key];
-    if (next === null || (typeof next !== 'object' && typeof next !== 'function')) {
-      cursor[key] = {};
+    const next = hasOwn(cursor, key) ? cursor[key] : undefined;
+    if (!isPlainObject(next) && !Array.isArray(next)) {
+      defineValue(cursor, key, {});
     }
     cursor = cursor[key];
   }
   const last = segments[segments.length - 1];
-  cursor[last] = value;
+  defineValue(cursor, last, value);
   return target;
 }

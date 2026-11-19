@@ -77,8 +77,9 @@ func New(cfg config.Config, log *accesslog.Logger) (*Handler, error) {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 	ip := clientIP(r)
+	logPath := r.URL.Path
 	defer func() {
-		h.log.Log(ip, r.Method, r.URL.Path, r.UserAgent(), rec.status)
+		h.log.Log(ip, r.Method, logPath, r.UserAgent(), rec.status)
 	}()
 
 	addr, err := netip.ParseAddr(ip)
@@ -87,18 +88,34 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	addr = addr.Unmap()
+	ip = addr.String()
 
-	rt := h.selectRoute(r)
+	path, err := decodePath(r)
+	if err != nil {
+		http.Error(rec, "invalid path encoding", http.StatusBadRequest)
+		return
+	}
+	logPath = path
+
+	rt := h.selectRoute(path)
 	if rt == nil {
 		http.Error(rec, "no route", http.StatusNotFound)
 		return
 	}
-	if !matchPrefix(r, &rt.cfg) || !rt.permits(addr) {
+
+	cleaned, ok := cleanPath(rt.cfg.Prefix, path)
+	if !ok {
+		http.Error(rec, "forbidden", http.StatusForbidden)
+		return
+	}
+	logPath = cleaned
+
+	if !matchPrefix(cleaned, &rt.cfg) || !rt.permits(addr) {
 		http.Error(rec, "forbidden", http.StatusForbidden)
 		return
 	}
 
-	target := h.upstreamURL(rt, r)
+	target := h.upstreamURL(rt, cleaned, r)
 	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), r.Body)
 	if err != nil {
 		http.Error(rec, "cannot build upstream request", http.StatusBadGateway)
@@ -106,7 +123,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	outReq.ContentLength = r.ContentLength
 	forwardHeaders(outReq.Header, r.Header)
-	outReq.Header.Add("X-Forwarded-For", ip)
+	outReq.Header.Set("X-Forwarded-For", ip)
 	outReq.Header.Set("X-Real-IP", ip)
 
 	resp, err := h.client.Do(outReq)
@@ -123,13 +140,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // selectRoute returns the matching route with the longest prefix. Ties are
 // resolved in configuration order.
-func (h *Handler) selectRoute(r *http.Request) *route {
-	path := r.URL.Path
+func (h *Handler) selectRoute(path string) *route {
 	var best *route
 	for i := range h.routes {
 		rt := &h.routes[i]
 		prefix := rt.cfg.Prefix
-		if prefix != "/" && path != prefix && !strings.HasPrefix(path, prefix+"/") {
+		if !pathHasPrefix(path, prefix) {
 			continue
 		}
 		if best == nil || len(prefix) > len(best.cfg.Prefix) {
@@ -139,12 +155,60 @@ func (h *Handler) selectRoute(r *http.Request) *route {
 	return best
 }
 
-func (h *Handler) upstreamURL(rt *route, r *http.Request) *url.URL {
+func (h *Handler) upstreamURL(rt *route, path string, r *http.Request) *url.URL {
 	target := *rt.upstream
-	target.Path = joinURLPath(target.Path, r.URL.Path)
+	target.Path = joinURLPath(target.Path, path)
 	target.RawPath = ""
 	target.RawQuery = r.URL.RawQuery
 	return &target
+}
+
+// decodePath percent-decodes the request path exactly once. The Go HTTP
+// server has already decoded URL.Path; EscapedPath returns the original
+// encoded form so decoding here does not recurse.
+func decodePath(r *http.Request) (string, error) {
+	return url.PathUnescape(r.URL.EscapedPath())
+}
+
+// cleanPath removes empty and "." segments and resolves ".." segments
+// relative to the selected route prefix. It reports false if a ".." would
+// escape above the prefix root.
+func cleanPath(prefix, path string) (string, bool) {
+	var rest string
+	switch {
+	case prefix == "/":
+		rest = strings.TrimPrefix(path, "/")
+	case path == prefix:
+		rest = ""
+	default:
+		rest = strings.TrimPrefix(path, prefix+"/")
+	}
+
+	segments := make([]string, 0, strings.Count(rest, "/")+1)
+	for _, segment := range strings.Split(rest, "/") {
+		switch segment {
+		case "", ".":
+			continue
+		case "..":
+			if len(segments) == 0 {
+				return "", false
+			}
+			segments = segments[:len(segments)-1]
+		default:
+			segments = append(segments, segment)
+		}
+	}
+
+	if prefix == "/" {
+		if len(segments) == 0 {
+			return "/", true
+		}
+		return "/" + strings.Join(segments, "/"), true
+	}
+	if len(segments) == 0 {
+		return prefix, true
+	}
+	return prefix + "/" + strings.Join(segments, "/"), true
 }
 
 func joinURLPath(base, path string) string {
@@ -176,26 +240,10 @@ func (rt *route) permits(addr netip.Addr) bool {
 	return false
 }
 
-// forwardHeaders copies src into dst.
-func forwardHeaders(dst, src http.Header) {
-	for name, values := range src {
-		for _, value := range values {
-			dst.Add(name, value)
-		}
-	}
-}
-
-// clientIP returns the address hopfence attributes the request to.
+// clientIP returns the address hopfence attributes the request to. It is
+// derived only from the TCP peer; forwarding headers are client input and are
+// never trusted.
 func clientIP(r *http.Request) string {
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		first := forwarded
-		if i := strings.IndexByte(first, ','); i >= 0 {
-			first = first[:i]
-		}
-		if first = strings.TrimSpace(first); first != "" {
-			return first
-		}
-	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return strings.Trim(r.RemoteAddr, "[]")

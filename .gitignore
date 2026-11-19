@@ -1,0 +1,22 @@
+node_modules/
+coverage/
+.nyc_output/
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# runtime state (serial allocation, scratch output)
+var/
+tmp/
+*.seq
+
+# editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# local working notes
+.build.prompt.txt

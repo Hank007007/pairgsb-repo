@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"sort"
 	"sync"
 )
 
@@ -99,9 +100,16 @@ func (t *ConnectionTable) Established(pkt Flow) bool {
 
 func checkEstablished(flows []Flow, pkt Flow) bool {
 	for _, f := range flows {
-		if f.Src == pkt.Src && f.Dst == pkt.Dst {
-			return true
+		if f.Protocol != pkt.Protocol {
+			continue
 		}
+		if f.Src.Unmap() != pkt.Dst.Unmap() || f.Dst.Unmap() != pkt.Src.Unmap() {
+			continue
+		}
+		if f.SrcPort != pkt.DstPort || f.DstPort != pkt.SrcPort {
+			continue
+		}
+		return true
 	}
 	return false
 }
@@ -138,10 +146,17 @@ func (e *Evaluator) Evaluate(q Query) (Decision, error) {
 	}
 	flow := q.Flow
 	flow.Protocol = proto
+	flow.Src = flow.Src.Unmap()
+	flow.Dst = flow.Dst.Unmap()
 
 	snap := e.source.Snapshot()
 	if _, ok := snap.SecurityGroup(q.GroupID); !ok {
 		return Decision{}, fmt.Errorf("acl: unknown security group %q", q.GroupID)
+	}
+	switch q.Direction {
+	case Ingress, Egress:
+	default:
+		return Decision{}, fmt.Errorf("acl: unknown direction %v", q.Direction)
 	}
 
 	if e.state != nil && e.state.Established(flow) {
@@ -167,7 +182,16 @@ func evaluateFlow(snap *Snapshot, groupID string, dir Direction, flow Flow) (Dec
 		return Decision{}, fmt.Errorf("acl: unknown direction %v", dir)
 	}
 
-	for _, rule := range book {
+	numbers := make([]RuleNumber, 0, len(book))
+	for number := range book {
+		numbers = append(numbers, number)
+	}
+	sort.Slice(numbers, func(i, j int) bool {
+		return numbers[i] < numbers[j]
+	})
+
+	for _, number := range numbers {
+		rule := book[number]
 		if !RuleMatches(rule, flow.Protocol, flow.DstPort) {
 			continue
 		}

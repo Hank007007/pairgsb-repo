@@ -12,7 +12,7 @@ func ProtocolMatches(ruleProto, pktProto Protocol) bool {
 // portMatch reports whether port falls inside the inclusive interval
 // [from, to] declared by a rule.
 func portMatch(from, to, port int) bool {
-	return port >= from || port <= to
+	return port >= from && port <= to
 }
 
 // RuleMatches reports whether rule applies to a packet described by proto and

@@ -2,7 +2,6 @@ package acl
 
 import (
 	"net/netip"
-	"strings"
 )
 
 // Member is one instance that currently belongs to a security group.
@@ -71,7 +70,7 @@ func (d *GroupDirectory) MembersOf(groupID string) []Member {
 	}
 	var out []Member
 	for _, m := range d.members {
-		if strings.HasPrefix(m.GroupID, groupID) {
+		if m.GroupID == groupID {
 			out = append(out, m)
 		}
 	}

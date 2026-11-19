@@ -27,10 +27,18 @@ func (p PrefixList) Contains(ip netip.Addr) bool {
 
 // Contains reports whether ip falls inside any of the given CIDR blocks.
 func Contains(entries []string, ip netip.Addr) bool {
+	ip = ip.Unmap()
 	for _, raw := range entries {
 		prefix, err := netip.ParsePrefix(raw)
 		if err != nil {
 			continue
+		}
+		if prefix.Addr().Is4In6() {
+			bits := prefix.Bits() - 96
+			if bits < 0 || bits > 32 {
+				continue
+			}
+			prefix = netip.PrefixFrom(prefix.Addr().Unmap(), bits).Masked()
 		}
 		if prefix.Contains(ip) {
 			return true

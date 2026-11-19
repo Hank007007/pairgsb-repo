@@ -70,28 +70,73 @@ func encodeKey(key string) []byte {
 	return []byte(key)
 }
 
-// encodeValue writes a field value. Empty values and values containing a
-// space are wrapped in double quotes; everything else is written bare.
+// encodeValue writes a field value using the bare/quoted rules from the
+// encoding specification.
 func encodeValue(value string) []byte {
 	if len(value) == 0 {
 		return []byte{'"', '"'}
 	}
 
-	needsQuote := false
-	for i := 0; i < len(value); i++ {
-		if value[i] == ' ' {
-			needsQuote = true
-			break
-		}
-	}
-
-	if !needsQuote {
+	if !needsQuote(value) {
 		return []byte(value)
 	}
 
 	out := make([]byte, 0, len(value)+2)
 	out = append(out, '"')
-	out = append(out, value...)
+	for i := 0; i < len(value); {
+		c := value[i]
+		switch {
+		case c == '\\':
+			out = append(out, '\\', '\\')
+			i++
+		case c == '"':
+			out = append(out, '\\', '"')
+			i++
+		case c == '\n':
+			out = append(out, '\\', 'n')
+			i++
+		case c == '\r':
+			out = append(out, '\\', 'r')
+			i++
+		case c == '\t':
+			out = append(out, '\\', 't')
+			i++
+		case c < 0x20 || c == 0x7f:
+			out = appendHexByte(out, c)
+			i++
+		case c == 0xE2 && i+2 < len(value) && value[i+1] == 0x80 &&
+			(value[i+2] == 0xA8 || value[i+2] == 0xA9):
+			if value[i+2] == 0xA8 {
+				out = append(out, `\u2028`...)
+			} else {
+				out = append(out, `\u2029`...)
+			}
+			i += 3
+		default:
+			out = append(out, c)
+			i++
+		}
+	}
 	out = append(out, '"')
 	return out
+}
+
+func needsQuote(value string) bool {
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if c == ' ' || c == '"' || c == '\\' || c == '=' ||
+			c < 0x20 || c == 0x7f {
+			return true
+		}
+		if c == 0xE2 && i+2 < len(value) && value[i+1] == 0x80 &&
+			(value[i+2] == 0xA8 || value[i+2] == 0xA9) {
+			return true
+		}
+	}
+	return false
+}
+
+func appendHexByte(out []byte, b byte) []byte {
+	const hex = "0123456789ABCDEF"
+	return append(out, '\\', 'u', '0', '0', hex[b>>4], hex[b&0x0F])
 }

@@ -48,14 +48,48 @@ func run(r io.Reader, w io.Writer, showKeys bool) (int, error) {
 
 // splitKeys returns the field names of a kv record in order.
 func splitKeys(line string) []string {
-	parts := strings.Fields(line)
-	keys := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if i := strings.IndexByte(p, '='); i >= 0 {
-			keys = append(keys, p[:i])
+	keys := make([]string, 0)
+	for i := 0; i < len(line); {
+		for i < len(line) && line[i] == ' ' {
+			i++
+		}
+		if i >= len(line) {
+			break
+		}
+
+		start := i
+		for i < len(line) && line[i] != '=' && line[i] != ' ' {
+			i++
+		}
+		keys = append(keys, line[start:i])
+
+		if i >= len(line) || line[i] != '=' {
 			continue
 		}
-		keys = append(keys, p)
+		i++
+
+		if i >= len(line) || line[i] != '"' {
+			for i < len(line) && line[i] != ' ' {
+				i++
+			}
+			continue
+		}
+
+		i++
+		for i < len(line) {
+			if line[i] == '\\' {
+				i++
+				if i < len(line) {
+					i++
+				}
+				continue
+			}
+			if line[i] == '"' {
+				i++
+				break
+			}
+			i++
+		}
 	}
 	return keys
 }

@@ -6,6 +6,7 @@ package fields
 import (
 	"errors"
 	"strings"
+	"unicode/utf8"
 )
 
 // MaxValueBytes is the maximum size, in bytes, of a normalized field value.
@@ -55,16 +56,56 @@ func NewSet() *Set {
 
 // Set records value under key.
 func (s *Set) Set(key, value string, source Source) error {
-	value = Normalize(value)
-
-	if i, ok := s.index[key]; ok {
-		s.fields[i] = Field{Key: key, Value: value, Source: source}
-		return nil
+	if !validKey(key) {
+		return ErrInvalidKey
 	}
+	if source == SourceExtension && isReservedName(key) {
+		return ErrReservedField
+	}
+	if _, ok := s.index[key]; ok {
+		return ErrDuplicateField
+	}
+
+	value = Normalize(value)
 
 	s.index[key] = len(s.fields)
 	s.fields = append(s.fields, Field{Key: key, Value: value, Source: source})
 	return nil
+}
+
+// validKey reports whether key matches [A-Za-z_][A-Za-z0-9_.-]*.
+func validKey(key string) bool {
+	if key == "" {
+		return false
+	}
+
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		if i == 0 {
+			if c != '_' && (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
+				return false
+			}
+			continue
+		}
+		if c != '_' && c != '.' && c != '-' &&
+			(c < '0' || c > '9') &&
+			(c < 'A' || c > 'Z') &&
+			(c < 'a' || c > 'z') {
+			return false
+		}
+	}
+	return true
+}
+
+// isReservedName reports whether key is one of the core field names.
+func isReservedName(key string) bool {
+	switch key {
+	case "timestamp", "service", "event_id", "level", "tenant_id", "trace_id",
+		"actor", "action", "resource", "path", "user_agent", "message":
+		return true
+	default:
+		return false
+	}
 }
 
 // Fields returns the fields in insertion order.
@@ -85,5 +126,10 @@ func Normalize(value string) string {
 	if len(value) <= MaxValueBytes {
 		return value
 	}
-	return value[:MaxValueBytes]
+
+	cut := MaxValueBytes
+	for cut > 0 && !utf8.RuneStart(value[cut]) {
+		cut--
+	}
+	return value[:cut]
 }

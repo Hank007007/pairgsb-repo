@@ -1,7 +1,14 @@
 import http from 'node:http';
 import { verifyToken, TokenError } from './jwt.js';
-import { matchRoute } from './routes.js';
+import { matchRoute, normalizeRequestPath } from './routes.js';
 import { missingScopes, parseScopes } from './scope.js';
+
+const IDENTITY_HEADERS = new Set([
+  'x-auth-sub',
+  'x-auth-roles',
+  'x-auth-user',
+  'x-forwarded-user',
+]);
 
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
@@ -19,25 +26,26 @@ const HOP_BY_HOP_HEADERS = new Set([
  * Builds the header block sent to the upstream service from the headers the
  * caller sent plus the identity the gateway authenticated.
  *
- * Hop-by-hop headers are never forwarded.
+ * Hop-by-hop headers are never forwarded. Caller-supplied identity headers
+ * are always stripped; only the gateway's own verified identity is written.
  */
 export function forwardHeaders(clientHeaders, identity) {
   const output = {};
 
-  if (identity !== null && identity !== undefined) {
-    output['x-auth-sub'] = identity.sub;
-    output['x-auth-roles'] = identity.roles.join(',');
-  }
-
   for (const [name, value] of Object.entries(clientHeaders)) {
     const lower = name.toLowerCase();
-    if (lower === 'x-auth-sub') {
+    if (IDENTITY_HEADERS.has(lower)) {
       continue;
     }
     if (HOP_BY_HOP_HEADERS.has(lower)) {
       continue;
     }
     output[lower] = value;
+  }
+
+  if (identity !== null && identity !== undefined) {
+    output['x-auth-sub'] = identity.sub;
+    output['x-auth-roles'] = identity.roles.join(',');
   }
 
   return output;
@@ -72,28 +80,25 @@ function authorize(route, identity) {
   return { ok: true };
 }
 
-function proxyRequest(request, response, route, options, identity) {
+function proxyRequest(request, response, route, options, identity, normalizedPath) {
   const upstreamBase = options.upstreams.get(route.upstream);
   if (typeof upstreamBase !== 'string' || upstreamBase.length === 0) {
-    sendJson(response, 502, { error: 'bad_gateway', message: 'upstream is not configured' });
+    sendJson(response, 502, {
+      error: 'bad_gateway',
+      code: 'bad_gateway',
+      message: 'upstream is not configured',
+    });
     return;
   }
 
   const rawTarget = typeof request.url === 'string' ? request.url : '/';
   const queryIndex = rawTarget.indexOf('?');
-  const rawPath = queryIndex === -1 ? rawTarget : rawTarget.slice(0, queryIndex);
   const search = queryIndex === -1 ? '' : rawTarget.slice(queryIndex);
-
-  if (!rawPath.startsWith('/')) {
-    sendJson(response, 400, { error: 'bad_request', code: 'bad_request' });
-    return;
-  }
 
   let target;
   try {
-    const parsed = new URL(`http://gateway.invalid${rawPath}`);
     target = new URL(upstreamBase);
-    target.pathname = parsed.pathname;
+    target.pathname = normalizedPath;
     target.search = search;
   } catch {
     sendJson(response, 400, { error: 'bad_request', code: 'bad_request' });
@@ -138,6 +143,7 @@ function proxyRequest(request, response, route, options, identity) {
     const timedOut = error.message === 'upstream timed out';
     sendJson(response, timedOut ? 504 : 502, {
       error: timedOut ? 'gateway_timeout' : 'bad_gateway',
+      code: timedOut ? 'gateway_timeout' : 'bad_gateway',
       message: timedOut ? 'upstream did not respond in time' : 'upstream is unavailable',
     });
   });
@@ -146,10 +152,17 @@ function proxyRequest(request, response, route, options, identity) {
 }
 
 async function handleRequest(request, response, settings) {
-  const route = matchRoute(request.url, settings.routes, settings.defaultRoute);
+  const normalizedPath = normalizeRequestPath(request.url);
+
+  if (normalizedPath === null) {
+    sendJson(response, 400, { error: 'bad_request', code: 'bad_request' });
+    return;
+  }
+
+  const route = matchRoute(normalizedPath, settings.routes, settings.defaultRoute);
 
   if (route === null) {
-    sendJson(response, 404, { error: 'not_found' });
+    sendJson(response, 404, { error: 'not_found', code: 'not_found' });
     return;
   }
 
@@ -196,7 +209,7 @@ async function handleRequest(request, response, settings) {
     }
   }
 
-  proxyRequest(request, response, route, settings, identity);
+  proxyRequest(request, response, route, settings, identity, normalizedPath);
 }
 
 /**
@@ -248,7 +261,7 @@ export function createProxy(options) {
     handleRequest(request, response, settings).catch((error) => {
       logger?.error?.('request handling failed', error);
       if (!response.headersSent) {
-        sendJson(response, 500, { error: 'internal_error' });
+        sendJson(response, 500, { error: 'internal_error', code: 'internal_error' });
       } else {
         response.destroy();
       }

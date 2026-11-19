@@ -31,7 +31,7 @@ export function hasScope(grantedScopes, requiredScope) {
   }
 
   return grantedScopes.some(
-    (scope) => typeof scope === 'string' && scope.startsWith(requiredScope),
+    (scope) => typeof scope === 'string' && scope === requiredScope,
   );
 }
 

@@ -14,8 +14,6 @@ export class TokenError extends Error {
   }
 }
 
-const EXPIRY_GRACE_SECONDS = 3600;
-
 /**
  * Builds the verifier key material from a JWKS document.
  *
@@ -60,10 +58,29 @@ export async function loadKeySet(filePath) {
 }
 
 function resolveKey(keys, header) {
-  if (typeof header.kid === 'string' && keys.byKid.has(header.kid)) {
-    return keys.byKid.get(header.kid);
+  if (typeof header.kid !== 'string' || header.kid.length === 0) {
+    throw new TokenError('claims', 'access token does not name a signing key');
   }
-  return keys.primary;
+  if (!keys.byKid.has(header.kid)) {
+    throw new TokenError('claims', 'access token names an unknown signing key');
+  }
+  return keys.byKid.get(header.kid);
+}
+
+function isJsonObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function requireNumericDate(payload, claim) {
+  const value = payload[claim];
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new TokenError('claims', `access token ${claim} must be a NumericDate`);
+  }
+  return value;
+}
+
+function asList(value) {
+  return Array.isArray(value) ? value : [value];
 }
 
 /**
@@ -73,7 +90,7 @@ function resolveKey(keys, header) {
  * and the token settings from the gateway configuration.
  */
 export async function verifyToken(token, options) {
-  const { keys } = options;
+  const { keys, token: policy } = options;
 
   if (typeof token !== 'string' || token.length === 0) {
     throw new TokenError('malformed', 'access token is missing');
@@ -84,6 +101,14 @@ export async function verifyToken(token, options) {
     header = decodeProtectedHeader(token);
   } catch {
     throw new TokenError('malformed', 'access token is not a well-formed JWT');
+  }
+  if (!isJsonObject(header)) {
+    throw new TokenError('malformed', 'access token header is not a JSON object');
+  }
+
+  const algorithms = asList(policy?.algorithms ?? ['RS256']);
+  if (typeof header.alg !== 'string' || !algorithms.includes(header.alg)) {
+    throw new TokenError('claims', 'access token uses a disallowed algorithm');
   }
 
   const key = resolveKey(keys, header);
@@ -100,10 +125,37 @@ export async function verifyToken(token, options) {
   } catch {
     throw new TokenError('malformed', 'access token payload is not a JSON object');
   }
+  if (!isJsonObject(payload)) {
+    throw new TokenError('malformed', 'access token payload is not a JSON object');
+  }
 
   const now = Math.floor(Date.now() / 1000);
-  if (typeof payload.exp !== 'number' || !(payload.exp + EXPIRY_GRACE_SECONDS > now)) {
+  const tolerance = policy?.clockToleranceSeconds ?? 30;
+
+  if (typeof payload.iss !== 'string' || payload.iss !== policy?.issuer) {
+    throw new TokenError('claims', 'access token issuer is not recognized');
+  }
+
+  const audiences = asList(policy?.audience ?? []);
+  const tokenAudiences = payload.aud === undefined ? [] : asList(payload.aud);
+  if (
+    tokenAudiences.length === 0 ||
+    tokenAudiences.some((audience) => typeof audience !== 'string') ||
+    !audiences.some((audience) => tokenAudiences.includes(audience))
+  ) {
+    throw new TokenError('claims', 'access token audience is not recognized');
+  }
+
+  const exp = requireNumericDate(payload, 'exp');
+  if (now > exp + tolerance) {
     throw new TokenError('expired', 'access token has expired');
+  }
+
+  if (payload.nbf !== undefined) {
+    const nbf = requireNumericDate(payload, 'nbf');
+    if (now < nbf - tolerance) {
+      throw new TokenError('not_yet_valid', 'access token is not yet valid');
+    }
   }
 
   if (typeof payload.sub !== 'string' || payload.sub.length === 0) {

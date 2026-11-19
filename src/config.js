@@ -100,7 +100,7 @@ function normalizeToken(rawToken) {
 
   const jwksPath =
     rawToken.jwksPath === undefined
-      ? 'keys/jwks.json'
+      ? path.join('..', 'keys', 'jwks.json')
       : requireString(rawToken.jwksPath, 'token.jwksPath');
 
   return Object.freeze({
@@ -162,6 +162,12 @@ function normalizeRoutes(rawRoutes, upstreams) {
       const prefix = requireString(rawRoute.prefix, `routes[${index}].prefix`);
       if (!prefix.startsWith('/')) {
         throw new ConfigError(`routes[${index}].prefix must start with "/"`);
+      }
+      if (prefix.includes('%')) {
+        throw new ConfigError(`routes[${index}].prefix must not contain percent escapes`);
+      }
+      if (prefix.split('/').some((segment) => segment === '.' || segment === '..')) {
+        throw new ConfigError(`routes[${index}].prefix must not contain dot segments`);
       }
 
       const upstream = requireString(rawRoute.upstream, `routes[${index}].upstream`);

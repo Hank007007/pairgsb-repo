@@ -1,0 +1,15 @@
+{
+  "principals": {
+    "user:ops": {
+      "rules": [
+        { "action": "publish", "topic": "#", "effect": "allow" },
+        { "action": "subscribe", "topic": "#", "effect": "allow" }
+      ]
+    },
+    "cn:monitoring.internal": {
+      "rules": [
+        { "action": "subscribe", "topic": "fleet/+/status", "effect": "allow" }
+      ]
+    }
+  }
+}

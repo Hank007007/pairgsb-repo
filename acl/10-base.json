@@ -1,0 +1,16 @@
+{
+  "principals": {
+    "user:alice": {
+      "rules": [
+        { "action": "publish", "topic": "sensors/+/state", "effect": "allow" },
+        { "action": "subscribe", "topic": "sensors/#", "effect": "allow" }
+      ]
+    },
+    "user:bob": {
+      "rules": [
+        { "action": "publish", "topic": "sensors/+/state", "effect": "allow" },
+        { "action": "subscribe", "topic": "sensors/+/state", "effect": "allow" }
+      ]
+    }
+  }
+}

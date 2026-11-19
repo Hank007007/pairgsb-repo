@@ -1,0 +1,16 @@
+{
+  "principals": {
+    "client:dev-1001": {
+      "rules": [
+        { "action": "publish", "topic": "fleet/dev-1001/#", "effect": "allow" },
+        { "action": "subscribe", "topic": "fleet/dev-1001/command/#", "effect": "allow" }
+      ]
+    },
+    "client:dev-1002": {
+      "rules": [
+        { "action": "publish", "topic": "fleet/dev-1002/#", "effect": "allow" },
+        { "action": "subscribe", "topic": "fleet/dev-1002/command/#", "effect": "allow" }
+      ]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "principals": {
+    "user:ops": {
+      "rules": [
+        { "action": "subscribe", "topic": "farm/private/#", "effect": "deny" },
+        { "action": "publish", "topic": "farm/private/#", "effect": "deny" }
+      ]
+    },
+    "client:dev-1001": {
+      "rules": [
+        { "action": "publish", "topic": "fleet/control/#", "effect": "deny" }
+      ]
+    }
+  }
+}

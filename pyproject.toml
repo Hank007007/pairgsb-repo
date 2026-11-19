@@ -1,0 +1,10 @@
+[project]
+name = "tokengrit"
+version = "0.1.0"
+description = "Internal API token issuance, verification, rotation and revocation"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

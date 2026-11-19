@@ -1,0 +1,30 @@
+# Build output
+/bin/
+/dist/
+/out/
+
+# Compiled binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Test and profile artifacts
+*.out
+coverage.*
+*.prof
+
+# Go caches
+.gocache/
+.cache/
+
+# Editor and OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local build prompt
+.build.prompt.txt

@@ -9,7 +9,7 @@ from .adapters.base import BackendAdapter
 from .coerce import coerce_node
 from .errors import CompileError, ErrorCode
 from .grammar import parse_node
-from .scope import TENANT_FIELD, tenant_clause, with_tenant
+from .scope import TENANT_FIELD, with_gateway_tenant
 
 
 @dataclass(frozen=True)
@@ -46,12 +46,10 @@ class FilterGate:
         if not isinstance(filter, dict) or not filter:
             return CompileResult.failure(ErrorCode.INVALID_FILTER)
 
-        scope = tenant_clause(tenant_id)
-        combined = with_tenant(scope, filter)
-
         try:
-            node = parse_node(combined)
+            node = parse_node(filter)
             node = coerce_node(node)
+            node = with_gateway_tenant(node, tenant_id)
         except CompileError as exc:
             return CompileResult.failure(exc.code)
 

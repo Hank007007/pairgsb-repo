@@ -7,6 +7,7 @@ normalized, and emits a query document for the log store.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 COLLECTION = "log_events"
@@ -27,7 +28,7 @@ def _leaf(clause: dict[str, Any], field: str) -> dict[str, Any]:
         return {
             "op": "regex",
             "field": field,
-            "pattern": clause["value"],
+            "pattern": re.escape(clause["value"]),
             "options": clause.get("options", ""),
         }
     return {"op": op[1:], "field": field, "value": clause["value"]}

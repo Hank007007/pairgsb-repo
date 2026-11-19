@@ -18,15 +18,12 @@ FIELD_TYPES: dict[str, str] = {
 }
 
 
-def field_root(field: str) -> str:
-    """Return the top-level segment of a field reference."""
-
-    return field.split(".", 1)[0]
-
-
 def is_known_field(field: Any) -> bool:
-    """Whether ``field`` refers to a field covered by the catalogue."""
+    """Whether ``field`` exactly matches a whitelisted field name.
 
-    if not isinstance(field, str) or not field:
-        return False
-    return field_root(field) in FIELD_TYPES
+    Matching is full-name, case-sensitive: dotted sub-document paths and
+    names containing ``$`` are rejected instead of being resolved against a
+    whitelisted top-level field.
+    """
+
+    return isinstance(field, str) and field in FIELD_TYPES

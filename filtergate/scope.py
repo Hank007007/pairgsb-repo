@@ -1,8 +1,10 @@
 """Tenant scope injection.
 
 The gateway owns the tenant boundary: callers supply a filter, the gateway
-supplies the tenant clause from the authenticated session.  ``with_tenant``
-produces the filter that is subsequently parsed and translated.
+supplies the tenant clause from the authenticated session.  Any
+``tenant_id`` condition carried in the caller's filter is discarded during
+parsing; :func:`with_gateway_tenant` then attaches the gateway-owned node at
+the root so the session tenant is the single source of tenant scoping.
 """
 
 from __future__ import annotations
@@ -18,7 +20,20 @@ def tenant_clause(tenant_id: str) -> dict[str, Any]:
     return {TENANT_FIELD: {"$eq": tenant_id}}
 
 
-def with_tenant(scope: dict[str, Any], user_filter: dict[str, Any]) -> dict[str, Any]:
-    """Combine the gateway scope with the caller-provided filter."""
+def tenant_node(tenant_id: str) -> dict[str, Any]:
+    """Build the internal gateway-owned tenant node."""
 
-    return {**scope, **user_filter}
+    return {
+        "kind": "field",
+        "field": TENANT_FIELD,
+        "clauses": [{"op": "$eq", "value": tenant_id}],
+    }
+
+
+def with_gateway_tenant(node: dict[str, Any], tenant_id: str) -> dict[str, Any]:
+    """Attach the gateway tenant node alongside the parsed user tree."""
+
+    scope = tenant_node(tenant_id)
+    if node["kind"] == "and":
+        return {"kind": "and", "children": [*node["children"], scope]}
+    return {"kind": "and", "children": [node, scope]}

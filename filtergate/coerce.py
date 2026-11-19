@@ -1,7 +1,9 @@
-"""Scalar normalization for filter operands.
+"""Scalar type validation for filter operands.
 
-The gateway resolves each field against the catalogue in :mod:`filtergate.fields`
-and hands adapters operands of the field's declared type.
+The gateway resolves each field against the catalogue in
+:mod:`filtergate.fields` and only hands adapters operands whose runtime type
+matches the field's declared type.  No implicit conversion is performed: a
+numeric string on an integer field is rejected rather than parsed.
 """
 
 from __future__ import annotations
@@ -9,29 +11,24 @@ from __future__ import annotations
 from typing import Any
 
 from .errors import CompileError, ErrorCode
-from .fields import FIELD_TYPES, field_root
+from .fields import FIELD_TYPES
 
 COMPARISON_OPS = frozenset({"$eq", "$ne", "$gt", "$gte", "$lt", "$lte"})
 
 
-def _coerce_scalar(field: str, op: str, value: Any) -> Any:
+def _check_scalar(field: str, op: str, value: Any) -> Any:
     if value is None:
         if op in {"$eq", "$ne"}:
             return None
         raise CompileError(ErrorCode.TYPE_MISMATCH)
 
-    expected = FIELD_TYPES[field_root(field)]
+    expected = FIELD_TYPES[field]
 
     if expected == "integer":
         if isinstance(value, bool):
             raise CompileError(ErrorCode.TYPE_MISMATCH)
         if isinstance(value, int):
             return value
-        if isinstance(value, str):
-            try:
-                return int(value)
-            except ValueError:
-                raise CompileError(ErrorCode.TYPE_MISMATCH) from None
         raise CompileError(ErrorCode.TYPE_MISMATCH)
 
     if isinstance(value, str):
@@ -40,24 +37,21 @@ def _coerce_scalar(field: str, op: str, value: Any) -> Any:
 
 
 def coerce_value(field: str, op: str, value: Any) -> Any:
-    """Return the operand normalized for ``field``.
-
-    Comparison operands are normalized to the field's declared type.  ``$in``
-    operands are normalized element-wise.  Operators outside the comparison
-    set pass through untouched so adapters receive them verbatim.
-    """
+    """Validate ``value`` against the declared type of ``field``."""
 
     if op == "$in":
-        if isinstance(value, list):
-            return [_coerce_scalar(field, op, item) for item in value]
-        return value
+        return [_check_scalar(field, op, item) for item in value]
     if op in COMPARISON_OPS:
-        return _coerce_scalar(field, op, value)
-    return value
+        return _check_scalar(field, op, value)
+    if op == "$regex":
+        if FIELD_TYPES[field] != "string":
+            raise CompileError(ErrorCode.TYPE_MISMATCH)
+        return value
+    raise CompileError(ErrorCode.UNKNOWN_OPERATOR)
 
 
 def coerce_node(node: dict) -> dict:
-    """Normalize every operand in a parsed node."""
+    """Type-check every operand in a parsed node."""
 
     kind = node["kind"]
     if kind in ("and", "or"):

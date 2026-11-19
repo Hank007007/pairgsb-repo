@@ -10,7 +10,8 @@ import time
 
 from . import audit
 from .store import IssuedToken, Store
-from .verify import verify_token
+from .token import parse_token
+from .verify import match_record, verify_token
 
 DEFAULT_GRACE_SECONDS = 24 * 60 * 60
 
@@ -39,20 +40,25 @@ def rotate(
     if not current.ok:
         raise RotationError(current.reason)
 
-    record = store.lookup_by_prefix(current.token_id)
+    parsed = parse_token(raw)
+    record = match_record(
+        store.lookup_by_prefix(current.token_id),
+        parsed.secret,
+    )
     if record is None:
         raise RotationError(current.reason)
 
     new_expires_at = expires_at if expires_at is not None else record.expires_at
+    new_scopes = tuple(scopes) if scopes is not None else record.scopes
 
     issued = store.issue(
-        scopes=[],
+        scopes=new_scopes,
         family_id=record.family_id,
         expires_at=new_expires_at,
         now=ts,
     )
 
-    grace_end = record.created_at + grace_seconds
+    grace_end = ts + grace_seconds
     if record.expires_at is not None:
         grace_end = min(grace_end, record.expires_at)
     store.mark_rotated(
@@ -66,7 +72,6 @@ def rotate(
         audit.TOKEN_ROTATED,
         token_id=issued.token_id,
         family_id=record.family_id,
-        token=raw,
         now=ts,
         predecessor=record.token_id,
         grace_expires_at=grace_end,

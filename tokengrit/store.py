@@ -7,7 +7,6 @@ share the same SQLite connection.
 from __future__ import annotations
 
 import json
-import secrets
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -159,7 +158,7 @@ class Store:
         """
         created = time.time() if now is None else now
         scope_list = tuple(scopes or ())
-        token_id = secrets.token_hex(4)
+        token_id = self._allocate_token_id()
         family = family_id if family_id is not None else token.new_family_id()
         secret = token.new_secret()
         self.insert_token(
@@ -176,7 +175,6 @@ class Store:
             audit.TOKEN_ISSUED,
             token_id=token_id,
             family_id=family,
-            token=raw,
             scopes=list(scope_list),
             now=created,
         )
@@ -189,13 +187,33 @@ class Store:
             expires_at=expires_at,
         )
 
-    def lookup_by_prefix(self, token_id: str) -> TokenRecord | None:
-        """Return the record for a public token id, or ``None``."""
-        row = self._conn.execute(
+    def _allocate_token_id(self) -> str:
+        """Allocate an identifier that is not already present in the store.
+
+        Random allocation alone is not sufficient: retry on collision and
+        surface an error instead of silently reusing a live identifier.
+        """
+        for _attempt in range(5):
+            candidate = token.new_token_id()
+            existing = self._conn.execute(
+                "SELECT 1 FROM tokens WHERE token_id = ? LIMIT 1",
+                (candidate,),
+            ).fetchone()
+            if existing is None:
+                return candidate
+        raise RuntimeError("unable to allocate a unique token identifier")
+
+    def lookup_by_prefix(self, token_id: str) -> list[TokenRecord]:
+        """Return every record sharing a public token id.
+
+        Historical imports may contain more than one record with the same
+        identifier, so callers must not assume a single row.
+        """
+        rows = self._conn.execute(
             "SELECT * FROM tokens WHERE token_id = ? ORDER BY row_id",
             (token_id,),
-        ).fetchone()
-        return _to_record(row) if row is not None else None
+        ).fetchall()
+        return [_to_record(row) for row in rows]
 
     def mark_rotated(
         self,
@@ -216,26 +234,54 @@ class Store:
         self._conn.commit()
 
     def revoke(self, token_or_id: str, *, now: float | None = None) -> int:
-        """Revoke a token.  Returns the number of rows whose state changed."""
+        """Revoke every token in the family of ``token_or_id``.
+
+        Returns the number of rows whose state changed.  A malformed value
+        or an unknown identifier is a no-op that still records an audit
+        event with zero affected tokens.
+        """
         revoked_at = time.time() if now is None else now
         token_id = token.token_id_of(token_or_id)
+        if not token_id:
+            audit.record(
+                self._conn,
+                audit.TOKEN_REVOKED,
+                token_id=None,
+                family_id=None,
+                now=revoked_at,
+                affected=0,
+            )
+            return 0
+
+        candidates = self.lookup_by_prefix(token_id)
+        if not candidates:
+            audit.record(
+                self._conn,
+                audit.TOKEN_REVOKED,
+                token_id=token_id,
+                family_id=None,
+                now=revoked_at,
+                affected=0,
+            )
+            return 0
+
+        family_ids = {record.family_id for record in candidates}
+        placeholders = ",".join("?" for _ in family_ids)
         cursor = self._conn.execute(
-            """
+            f"""
             UPDATE tokens
                SET revoked_at = ?
-             WHERE token_id = ?
+             WHERE family_id IN ({placeholders})
                AND revoked_at IS NULL
             """,
-            (revoked_at, token_id),
+            (revoked_at, *family_ids),
         )
         self._conn.commit()
-        row = self.lookup_by_prefix(token_id)
         audit.record(
             self._conn,
             audit.TOKEN_REVOKED,
             token_id=token_id or None,
-            family_id=row.family_id if row is not None else None,
-            token=token_or_id,
+            family_id=candidates[0].family_id,
             now=revoked_at,
             affected=cursor.rowcount,
         )

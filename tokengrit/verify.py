@@ -7,6 +7,7 @@ in ``docs/token-format.md``.
 
 from __future__ import annotations
 
+import hmac
 import time
 from dataclasses import dataclass, field
 
@@ -18,6 +19,10 @@ INVALID = "invalid_token"
 REVOKED = "revoked"
 EXPIRED = "expired"
 INSUFFICIENT_SCOPE = "insufficient_scope"
+
+CATEGORY_MALFORMED = "malformed"
+CATEGORY_UNKNOWN_PREFIX = "unknown_prefix"
+CATEGORY_BAD_SECRET = "bad_secret"
 
 
 @dataclass(frozen=True)
@@ -33,12 +38,10 @@ class VerifyResult:
 
 def _fail(
     store: Store,
-    reason: str,
-    detail: str,
     *,
-    raw: str,
     token_id: str | None = None,
     family_id: str | None = None,
+    detail: str,
     now: float,
 ) -> VerifyResult:
     audit.record(
@@ -46,12 +49,11 @@ def _fail(
         audit.TOKEN_VERIFY_FAILED,
         token_id=token_id,
         family_id=family_id,
-        token=raw,
         now=now,
-        reason=reason,
+        reason=INVALID,
         detail=detail,
     )
-    return VerifyResult(False, reason, token_id, family_id, ())
+    return VerifyResult(False, INVALID, None, None, ())
 
 
 def _digest_matches(secret: str, record: TokenRecord) -> bool:
@@ -64,7 +66,26 @@ def _digest_matches(secret: str, record: TokenRecord) -> bool:
         p=params.p,
         dklen=len(params.digest),
     )
-    return derived.hex() == params.digest.hex()
+    return hmac.compare_digest(derived, params.digest)
+
+
+def match_record(
+    candidates: list[TokenRecord], secret: str
+) -> TokenRecord | None:
+    """Return the candidate whose stored hash matches ``secret``.
+
+    Every candidate is compared independently; a single matching record is
+    sufficient to authenticate the token.  A record whose stored hash is not
+    a well-formed scrypt representation is a storage integrity error for
+    that record and can never authenticate.
+    """
+    for record in candidates:
+        try:
+            if _digest_matches(secret, record):
+                return record
+        except ValueError:
+            continue
+    return None
 
 
 def verify_token(
@@ -78,72 +99,82 @@ def verify_token(
     ts = time.time() if now is None else now
     parsed = token.parse_token(raw)
     if parsed is None:
-        return _fail(store, INVALID, "malformed", raw=str(raw), now=ts)
-
-    record = store.lookup_by_prefix(parsed.token_id)
-    if record is None:
         return _fail(
             store,
-            "unknown_prefix",
-            "unknown_prefix",
-            raw=raw,
-            token_id=parsed.token_id,
+            token_id=None,
+            family_id=None,
+            detail=CATEGORY_MALFORMED,
             now=ts,
         )
 
-    if not _digest_matches(parsed.secret, record):
+    candidates = store.lookup_by_prefix(parsed.token_id)
+    if not candidates:
         return _fail(
             store,
-            "bad_secret",
-            "bad_secret",
-            raw=raw,
             token_id=parsed.token_id,
-            family_id=record.family_id,
+            family_id=None,
+            detail=CATEGORY_UNKNOWN_PREFIX,
+            now=ts,
+        )
+
+    record = match_record(candidates, parsed.secret)
+    if record is None:
+        return _fail(
+            store,
+            token_id=parsed.token_id,
+            family_id=candidates[0].family_id,
+            detail=CATEGORY_BAD_SECRET,
             now=ts,
         )
 
     if record.revoked_at is not None:
-        return _fail(
-            store,
-            REVOKED,
-            "revoked",
-            raw=raw,
+        audit.record(
+            store.connection,
+            audit.TOKEN_VERIFY_FAILED,
             token_id=record.token_id,
             family_id=record.family_id,
             now=ts,
+            reason=REVOKED,
+            detail="revoked",
         )
+        return VerifyResult(False, REVOKED, record.token_id, record.family_id, ())
 
     if record.expires_at is not None and ts >= record.expires_at:
-        return _fail(
-            store,
-            EXPIRED,
-            "expired",
-            raw=raw,
+        audit.record(
+            store.connection,
+            audit.TOKEN_VERIFY_FAILED,
             token_id=record.token_id,
             family_id=record.family_id,
             now=ts,
+            reason=EXPIRED,
+            detail="expired",
         )
+        return VerifyResult(False, EXPIRED, record.token_id, record.family_id, ())
 
     if record.grace_expires_at is not None and ts >= record.grace_expires_at:
-        return _fail(
-            store,
-            EXPIRED,
-            "grace_expired",
-            raw=raw,
+        audit.record(
+            store.connection,
+            audit.TOKEN_VERIFY_FAILED,
             token_id=record.token_id,
             family_id=record.family_id,
             now=ts,
+            reason=EXPIRED,
+            detail="grace_expired",
         )
+        return VerifyResult(False, EXPIRED, record.token_id, record.family_id, ())
 
     if required_scope is not None and required_scope not in record.scopes:
-        return _fail(
-            store,
-            INSUFFICIENT_SCOPE,
-            "insufficient_scope",
-            raw=raw,
+        audit.record(
+            store.connection,
+            audit.TOKEN_VERIFY_FAILED,
             token_id=record.token_id,
             family_id=record.family_id,
             now=ts,
+            reason=INSUFFICIENT_SCOPE,
+            detail="insufficient_scope",
+        )
+        return VerifyResult(
+            False, INSUFFICIENT_SCOPE, record.token_id, record.family_id, ()
         )
 
     audit.record(
@@ -151,7 +182,6 @@ def verify_token(
         audit.TOKEN_VERIFIED,
         token_id=record.token_id,
         family_id=record.family_id,
-        token=raw,
         now=ts,
         scopes=list(record.scopes),
     )

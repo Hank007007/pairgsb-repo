@@ -36,7 +36,6 @@ def record(
     *,
     token_id: str | None = None,
     family_id: str | None = None,
-    token: str | None = None,
     now: float | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
@@ -48,8 +47,6 @@ def record(
         "family_id": family_id,
     }
     payload.update(extra)
-    if token is not None:
-        payload["token"] = token
     conn.execute(
         """
         INSERT INTO audit_events (ts, event, token_id, family_id, payload)

@@ -1,0 +1,19 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Coverage / profiles
+*.prof
+coverage.txt
+
+# Tooling and editor state
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Local build scratch
+.build.prompt.txt

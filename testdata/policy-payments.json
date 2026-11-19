@@ -1,0 +1,20 @@
+{
+  "accessors": [
+    {
+      "id": "svc-payments",
+      "token": "acc_payments_dev",
+      "rules": [
+        {"effect": "allow", "path": "kv/app/payments/*"},
+        {"effect": "deny", "path": "kv/app/payments/refund-signing"}
+      ]
+    },
+    {
+      "id": "svc-audit",
+      "token": "acc_audit_dev",
+      "rules": [
+        {"effect": "deny", "path": "kv/app/payments/stripe"},
+        {"effect": "allow", "path": "kv/app/**"}
+      ]
+    }
+  ]
+}

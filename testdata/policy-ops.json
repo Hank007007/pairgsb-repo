@@ -1,0 +1,18 @@
+{
+  "accessors": [
+    {
+      "id": "svc-app",
+      "token": "acc_app_dev",
+      "rules": [
+        {"effect": "allow", "path": "kv/app/*"}
+      ]
+    },
+    {
+      "id": "svc-ops",
+      "token": "acc_ops_dev",
+      "rules": [
+        {"effect": "allow", "path": "kv/app/**"}
+      ]
+    }
+  ]
+}

@@ -26,6 +26,8 @@ export function principalKeys(identity = {}) {
  */
 export function decide(rules, action, subject) {
   const candidates = Array.isArray(rules) ? rules : [];
+  let allowedBy = null;
+  let deniedBy = null;
 
   for (const rule of candidates) {
     if (rule.action !== action) {
@@ -34,12 +36,20 @@ export function decide(rules, action, subject) {
     if (!filterCovers(rule.topic, subject)) {
       continue;
     }
-    return {
-      effect: rule.effect,
-      rule,
-    };
+
+    if (rule.effect === 'deny') {
+      deniedBy = rule;
+    } else if (allowedBy === null) {
+      allowedBy = rule;
+    }
   }
 
+  if (deniedBy) {
+    return { effect: 'deny', rule: deniedBy };
+  }
+  if (allowedBy) {
+    return { effect: 'allow', rule: allowedBy };
+  }
   return { effect: 'deny', rule: null };
 }
 

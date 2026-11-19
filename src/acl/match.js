@@ -115,16 +115,66 @@ export function topicMatchesFilter(filter, topic) {
  * True when the rule filter applies to the supplied subject.
  *
  * `subject` is either a concrete topic name (publish authorization) or
- * another topic filter (subscribe authorization).
+ * another topic filter (subscribe authorization). Coverage is decided level
+ * by level: a string-prefix comparison would confuse `sensors` with
+ * `sensors2` and `a/b` with `a/bc`.
  */
 export function filterCovers(ruleFilter, subject) {
   if (typeof ruleFilter !== 'string' || typeof subject !== 'string') {
     return false;
   }
-  if (ruleFilter === '#') {
-    return true;
+  if (!isValidFilter(ruleFilter) || !isValidFilter(subject)) {
+    return false;
   }
 
-  const prefix = ruleFilter.endsWith('/#') ? ruleFilter.slice(0, -2) : ruleFilter;
-  return subject.startsWith(prefix) || prefix.startsWith(subject);
+  const ruleLevels = ruleFilter.split('/');
+  const subjectLevels = subject.split('/');
+
+  if (!subjectLevels.includes('+') && !subjectLevels.includes('#')) {
+    return topicMatchesFilter(ruleFilter, subject);
+  }
+
+  return filterCoversFilter(ruleLevels, subjectLevels);
+}
+
+/**
+ * Filter-to-filter coverage (subscribe authorization).
+ *
+ * The rule filter must cover every topic the requested filter could select.
+ * A rule `+` covers any single request level (including a request `+`); a
+ * rule `#` covers the request's remaining levels (including a request `#`),
+ * while a request `#` can only be covered by a rule `#` at the same position.
+ */
+function filterCoversFilter(ruleLevels, requestLevels) {
+  let ruleIndex = 0;
+  let requestIndex = 0;
+
+  while (ruleIndex < ruleLevels.length || requestIndex < requestLevels.length) {
+    if (ruleIndex >= ruleLevels.length) {
+      return false;
+    }
+
+    const ruleLevel = ruleLevels[ruleIndex];
+    if (ruleLevel === '#') {
+      return true;
+    }
+
+    if (requestIndex >= requestLevels.length) {
+      return false;
+    }
+
+    const requestLevel = requestLevels[requestIndex];
+    if (requestLevel === '#') {
+      return false;
+    }
+
+    if (ruleLevel !== '+' && ruleLevel !== requestLevel) {
+      return false;
+    }
+
+    ruleIndex += 1;
+    requestIndex += 1;
+  }
+
+  return true;
 }

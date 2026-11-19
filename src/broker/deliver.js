@@ -29,16 +29,19 @@ export function deliverMessage({ acl, identity, subscription, topic, payload, re
  * Deliver the retained set to a subscription.
  *
  * The retained entries are filtered by the subscription's filter and stamped
- * with the client they are being delivered to.
+ * with the client they are being delivered to. Each entry is re-authorized at
+ * delivery time against its concrete topic: the cached subscription decision
+ * only covers the subscription request itself and must not be reused after a
+ * reload tightens the rules. Rejected entries are silently skipped.
  */
 export function deliverRetained({ acl, identity, subscription, retained }) {
-  if (!subscription.decision || !subscription.decision.allowed) {
-    return [];
-  }
-
   const out = [];
   for (const entry of retained) {
     if (!topicMatchesFilter(subscription.filter, entry.topic)) {
+      continue;
+    }
+    const decision = acl.canReceive(identity, entry.topic);
+    if (!decision.allowed) {
       continue;
     }
     out.push({
@@ -48,6 +51,7 @@ export function deliverRetained({ acl, identity, subscription, retained }) {
       retain: true,
       filter: subscription.filter,
       clientId: identity?.clientId ?? null,
+      decision,
     });
   }
   return out;

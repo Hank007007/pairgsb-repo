@@ -1,4 +1,5 @@
 import { isValidSubscriptionFilter } from '../acl/match.js';
+import { splitSharedSubscription } from '../acl/share.js';
 
 /**
  * Authorize a subscription request.
@@ -12,7 +13,9 @@ export function onSubscribe({ acl, identity, filter, session = null }) {
     return { ok: false, reason: 'invalid-filter', filter };
   }
 
-  const decision = acl.subscribe(identity, filter);
+  const shared = splitSharedSubscription(filter);
+  const authorizedFilter = shared ? shared.filter : filter;
+  const decision = acl.subscribe(identity, authorizedFilter);
   if (!decision.allowed) {
     return { ok: false, reason: 'not-authorized', filter, decision };
   }

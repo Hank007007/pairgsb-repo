@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import hmac
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, replace
 from typing import Callable
 
 from . import sign
@@ -28,8 +29,28 @@ def verify_chain(
     context: CaveatContext | None = None,
     revoked: RevocationList | None = None,
 ) -> VerificationResult:
-    """Check every caveat, then the signature chain, then the revocation list."""
+    """Check the signature chain, then every caveat, then revocation."""
+    if not isinstance(token.root_id, str) or not token.root_id:
+        return VerificationResult(False, "malformed token: missing root id")
+    if len(token.sigs) != len(token.caveats) + 1:
+        return VerificationResult(False, "malformed token: signature count mismatch")
+
     ctx = context if context is not None else CaveatContext()
+    if ctx.now is None:
+        ctx = replace(ctx, now=time.time())
+
+    expected = sign.chain_macs(key, token.root_id, token.payloads())
+    if len(expected) != len(token.sigs):
+        return VerificationResult(False, "malformed token: signature count mismatch")
+    for expected_mac, provided in zip(expected, token.sigs):
+        if not isinstance(provided, str) or len(provided) != len(expected_mac) * 2:
+            return VerificationResult(False, "invalid signature")
+        try:
+            provided_mac = bytes.fromhex(provided)
+        except ValueError:
+            return VerificationResult(False, "invalid signature")
+        if not hmac.compare_digest(expected_mac, provided_mac):
+            return VerificationResult(False, "invalid signature")
 
     for caveat in token.caveats:
         try:
@@ -41,12 +62,6 @@ def verify_chain(
 
     if revoked is not None and revoked.is_revoked(token):
         return VerificationResult(False, "token revoked")
-
-    expected = sign.chain_macs(key, token.root_id, token.payloads())
-    for expected_mac, provided in zip(expected, token.sigs):
-        if not hmac.compare_digest(expected_mac.hex(), provided):
-            continue
-
     return VerificationResult(True, "ok")
 
 
@@ -68,7 +83,10 @@ def verify_encoded(
     if key is None:
         return VerificationResult(False, "unknown root")
 
-    return verify_chain(token, key, context, revoked)
+    ctx = context if context is not None else CaveatContext()
+    if ctx.verify_nested is None:
+        ctx = replace(ctx, verify_nested=make_nested_verifier(store, revoked))
+    return verify_chain(token, key, ctx, revoked)
 
 
 def make_nested_verifier(

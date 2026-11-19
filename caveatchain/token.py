@@ -32,7 +32,7 @@ def _b64encode(raw: bytes) -> str:
 
 def _b64decode(text: str) -> bytes:
     padding = "=" * (-len(text) % 4)
-    return base64.urlsafe_b64decode(text + padding)
+    return base64.b64decode(text + padding, altchars=b"-_", validate=True)
 
 
 def _signatures(key: bytes, root_id: str, caveats: Iterable[Mapping[str, Any]]) -> tuple[str, ...]:
@@ -97,18 +97,22 @@ class Token:
             raise TokenFormatError("token payload is not valid JSON") from exc
         if not isinstance(body, dict):
             raise TokenFormatError("token payload must be an object")
-        if body.get("v") != VERSION:
-            raise TokenFormatError(f"unsupported token version: {body.get('v')!r}")
+        version = body.get("v")
+        if isinstance(version, bool) or not isinstance(version, int) or version != VERSION:
+            raise TokenFormatError(f"unsupported token version: {version!r}")
 
         root_id = body.get("rid")
         if not isinstance(root_id, str) or not root_id:
             raise TokenFormatError("token is missing a root id")
 
-        caveats = body.get("cv", [])
+        if "cv" not in body or "sg" not in body:
+            raise TokenFormatError("token is missing caveats or signatures")
+
+        caveats = body["cv"]
         if not isinstance(caveats, list) or not all(isinstance(c, dict) for c in caveats):
             raise TokenFormatError("token caveats must be a list of objects")
 
-        sigs = body.get("sg", [])
+        sigs = body["sg"]
         if not isinstance(sigs, list) or not all(isinstance(s, str) for s in sigs):
             raise TokenFormatError("token signatures must be a list of strings")
         if len(sigs) != len(caveats) + 1:

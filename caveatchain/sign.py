@@ -51,11 +51,12 @@ def chain_macs(key: bytes, root_id: str, caveats: Sequence[str | bytes]) -> list
     """
     payloads = [_as_payload(item) for item in caveats]
     base = root_mac(key, root_id)
-    prefix = b""
+    prefix = bytearray()
     macs = [base]
     for payload in payloads:
+        prefix += len(payload).to_bytes(8, "big")
         prefix += payload
-        macs.append(hmac.new(key, base + prefix, hashlib.sha256).digest())
+        macs.append(hmac.new(key, base + bytes(prefix), hashlib.sha256).digest())
     return macs
 
 

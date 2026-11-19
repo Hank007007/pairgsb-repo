@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Mapping
 
-from .token import Token
+from .caveats import MAX_NESTING_DEPTH
+from .token import Token, TokenFormatError
 
 
 @dataclass(frozen=True)
@@ -59,22 +60,45 @@ class RevocationList:
         return len(stale)
 
     def lookup(self, root_id: str) -> RevocationEntry | None:
+        return self._lookup(root_id, self._clock())
+
+    def _lookup(self, root_id: str, now: float) -> RevocationEntry | None:
         entry = self._entries.get(root_id)
         if entry is None:
             return None
-        if entry.expires_at < self._clock():
+        if entry.expires_at < now:
             return None
         return entry
 
     def is_revoked(self, token: Token) -> bool:
         """Return whether ``token`` is covered by this list."""
-        if not token.caveats:
+        return self._is_revoked(token, 0, set(), self._clock())
+
+    def _is_revoked(
+        self,
+        token: Token,
+        depth: int,
+        seen: set[str],
+        now: float,
+    ) -> bool:
+        if self._lookup(token.root_id, now) is not None:
+            return True
+        if depth >= MAX_NESTING_DEPTH:
             return False
-        head = token.caveats[0]
-        root_id = head.get("root")
-        if not isinstance(root_id, str):
-            return False
-        return self.lookup(root_id) is not None
+        for caveat in token.caveats:
+            if not isinstance(caveat, Mapping) or caveat.get("type") != "nested":
+                continue
+            embedded = caveat.get("token")
+            if not isinstance(embedded, str) or not embedded or embedded in seen:
+                continue
+            seen.add(embedded)
+            try:
+                inner = Token.decode(embedded)
+            except (TokenFormatError, ValueError):
+                continue
+            if self._is_revoked(inner, depth + 1, seen, now):
+                return True
+        return False
 
     def __len__(self) -> int:
         return len(self._entries)

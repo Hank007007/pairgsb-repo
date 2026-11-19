@@ -1,0 +1,17 @@
+{
+  "service": {
+    "name": "orders",
+    "port": 8080
+  },
+  "db": {
+    "host": "db.internal",
+    "pool": {
+      "size": 4,
+      "timeoutMs": 1000
+    }
+  },
+  "features": ["beta"],
+  "logging": {
+    "level": "info"
+  }
+}

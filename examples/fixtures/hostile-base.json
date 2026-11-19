@@ -1,0 +1,13 @@
+{
+  "__proto__": {
+    "polluted": "from-base"
+  },
+  "constructor": {
+    "prototype": {
+      "polluted": "from-base"
+    }
+  },
+  "service": {
+    "name": "orders"
+  }
+}

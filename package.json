@@ -1,0 +1,25 @@
+{
+  "name": "mergeknot-config",
+  "version": "0.3.0",
+  "description": "Layered configuration SDK for Mergeknot services",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "test": "node --test",
+    "demo": "node examples/load-demo.js",
+    "check:proto": "node examples/proto-check.js"
+  },
+  "keywords": [
+    "config",
+    "layers",
+    "json-patch"
+  ],
+  "license": "MIT",
+  "private": true
+}

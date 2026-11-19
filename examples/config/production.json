@@ -1,0 +1,11 @@
+{
+  "db": {
+    "pool": {
+      "size": 16
+    }
+  },
+  "logging": {
+    "level": "trace"
+  },
+  "features": ["beta", "audit"]
+}

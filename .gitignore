@@ -1,0 +1,26 @@
+# Build output
+/signward
+/signward.exe
+/bin/
+/dist/
+*.test
+
+# Test and coverage artifacts
+*.out
+coverage.*
+profile.*
+
+# Local runtime state (keys, policies, audit trail)
+signward-keys/
+*.key
+audit.log
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local scratch notes
+.build.prompt.txt
+.scratch-run/

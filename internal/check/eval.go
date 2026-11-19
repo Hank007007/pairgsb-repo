@@ -48,7 +48,7 @@ func (s *evalState) evalRewrite(node schema.Node, object tuple.Object, relation 
 		if err != nil {
 			return false, err
 		}
-		return left || right, nil
+		return left && !right, nil
 
 	default:
 		return false, newError(CodeUnknownRelation, "unsupported rewrite node %T", node)
@@ -69,7 +69,7 @@ func (s *evalState) evalSelf(object tuple.Object, relation string, requested tup
 		if err != nil {
 			return false, err
 		}
-		ok, err := s.evalRelation(target, targetRelation, requested, inner)
+		ok, err := s.evalRelationAt(target, targetRelation, requested, inner)
 		if err != nil {
 			return false, err
 		}
@@ -82,15 +82,22 @@ func (s *evalState) evalSelf(object tuple.Object, relation string, requested tup
 
 // evalRelation evaluates relation on object.
 func (s *evalState) evalRelation(object tuple.Object, relation string, requested tuple.Subject, ctx Context) (bool, error) {
-	node, ok := s.rewriteFor(object, relation)
-	if !ok {
-		return false, nil
-	}
 	inner, err := ctx.Descend(descendRelation)
 	if err != nil {
 		return false, err
 	}
-	return s.evalRewrite(node, object, relation, requested, inner)
+	return s.evalRelationAt(object, relation, requested, inner)
+}
+
+// evalRelationAt evaluates relation on object using a context whose descent
+// budget has already been charged by the caller (a bare relation reference or
+// a subject-set expansion).
+func (s *evalState) evalRelationAt(object tuple.Object, relation string, requested tuple.Subject, ctx Context) (bool, error) {
+	node, ok := s.rewriteFor(object, relation)
+	if !ok {
+		return false, nil
+	}
+	return s.evalRewrite(node, object, relation, requested, ctx)
 }
 
 // evalTupleToUserset follows the tuples of n.Tupleset to reach other objects,
@@ -105,7 +112,7 @@ func (s *evalState) evalTupleToUserset(n *schema.TupleToUserset, object tuple.Ob
 		if err != nil {
 			return false, err
 		}
-		ok, err = s.evalRelation(target, n.Tupleset, requested, inner)
+		ok, err = s.evalRelationAt(target, n.ComputedUserset, requested, inner)
 		if err != nil {
 			return false, err
 		}

@@ -40,14 +40,11 @@ func (c Context) Remaining() int {
 	return c.remaining
 }
 
-// Descend returns the context to use for one step of nested evaluation.
-//
-// Expanding a subject set pulls in the tuples of the relation it names, so it
-// is charged against the budget.
+// Descend returns the context to use for one step of nested evaluation. Every
+// descent named in the relation model (subject-set expansion, computed
+// userset reference and tuple-to-userset hop) consumes one unit of the
+// budget, so no evaluation path can run past MaxDepth steps.
 func (c Context) Descend(mode descentMode) (Context, error) {
-	if mode != descendUserset {
-		return c, nil
-	}
 	if c.remaining <= 0 {
 		return c, newError(CodeDepthExceeded, "descent budget of %d exhausted", MaxDepth)
 	}

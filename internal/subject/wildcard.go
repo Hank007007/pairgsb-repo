@@ -20,8 +20,10 @@ func Match(stored, requested tuple.Subject) bool {
 // matchesWildcard handles the case where the stored subject is a namespace
 // wildcard.
 func matchesWildcard(wildcard, requested tuple.Subject) bool {
+	// A wildcard only covers terminal subjects in its namespace. It never
+	// covers a subject set such as group:eng#member.
 	if requested.IsUserset() {
-		return true
+		return false
 	}
 	return wildcard.Namespace == requested.Namespace
 }

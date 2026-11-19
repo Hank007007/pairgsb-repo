@@ -27,7 +27,17 @@ func (v *View) Revision() tuple.Revision {
 // AtRevision returns the view used by a check that carries a revision. A
 // zero revision denotes the newest view.
 func (s *Service) AtRevision(revision tuple.Revision) (*View, error) {
-	snapshot := s.store.Latest()
+	snapshot, err := s.store.View(revision)
+	if err != nil {
+		switch err {
+		case tuple.ErrFutureRevision:
+			return nil, newError(CodeFutureRevision, "revision %d is newer than the store", revision)
+		case tuple.ErrStaleRevision:
+			return nil, newError(CodeStaleRevision, "revision %d has been garbage collected", revision)
+		default:
+			return nil, newError(CodeInvalidRequest, "%v", err)
+		}
+	}
 	return newView(snapshot, s.rules), nil
 }
 

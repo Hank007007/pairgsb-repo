@@ -1,0 +1,15 @@
+{
+  "name": "egressvault",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Egress-side credential injection proxy with host-scoped routing, TLS pinning and audit logging",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/proxy.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  }
+}

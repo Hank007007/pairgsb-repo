@@ -1,0 +1,37 @@
+{
+  "credentials": {
+    "svc-example-api": {
+      "scheme": "Bearer",
+      "secret": "fixture-api-token-not-a-real-secret",
+      "headers": {
+        "X-Egress-Tenant": "example"
+      }
+    },
+    "svc-example-internal": {
+      "header": "X-Api-Key",
+      "secret": "fixture-internal-key-not-a-real-secret"
+    },
+    "svc-example-mtls": {
+      "scheme": "Bearer",
+      "secret": "fixture-mtls-token-not-a-real-secret",
+      "clientCert": {
+        "certFile": "client.pem",
+        "keyFile": "client-key.pem"
+      }
+    }
+  },
+  "rules": [
+    {
+      "host": "api.example.com",
+      "credential": "svc-example-api"
+    },
+    {
+      "host": "localhost",
+      "credential": "svc-example-api"
+    },
+    {
+      "host": "internal.example.com",
+      "credential": "svc-example-internal"
+    }
+  ]
+}

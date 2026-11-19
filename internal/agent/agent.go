@@ -94,7 +94,7 @@ func (a *Agent) Unlock() error {
 	now := a.now()
 	a.unlock = true
 	a.unlockedAt = now
-	a.expiresAt = time.Time{}
+	a.expiresAt = now.Add(SessionTTL)
 	a.audit.RecordAt(now, audit.EventSessionUnlocked, "", "", "")
 	return nil
 }
@@ -135,7 +135,7 @@ func (a *Agent) Sign(req Request) (Response, error) {
 		return Response{}, ErrKeyHandleMissing
 	}
 
-	key, err := a.store.Resolve(req.KeyHandle)
+	key, err := a.store.ResolveAt(req.KeyHandle, now)
 	if err != nil {
 		a.audit.RecordAt(now, audit.EventSignDenied, req.KeyHandle, req.Purpose, err.Error())
 		return Response{}, err
@@ -150,12 +150,13 @@ func (a *Agent) Sign(req Request) (Response, error) {
 	}
 
 	counter := a.counterFor(key.Handle)
-	sig := key.Sign(req.Payload)
-	used := counter.Observe(now)
-	if used > key.Policy.MaxSignaturesPerHour {
+	if !key.Policy.SignaturesAllowed(counter.Used(now)) {
 		a.audit.RecordAt(now, audit.EventSignDenied, req.KeyHandle, req.Purpose, "hourly signature quota exceeded")
+		return Response{}, ErrQuotaExceeded
 	}
 
+	sig := key.Sign(req.Payload)
+	counter.Observe(now)
 	a.audit.RecordAt(now, audit.EventSignIssued, req.KeyHandle, req.Purpose, "")
 	return Response{
 		KeyHandle: key.Handle,
@@ -176,6 +177,8 @@ func (a *Agent) sessionActive(now time.Time) bool {
 	}
 	if !now.Before(a.expiresAt) {
 		a.unlock = false
+		a.unlockedAt = time.Time{}
+		a.expiresAt = time.Time{}
 		a.audit.RecordAt(now, audit.EventSessionExpired, "", "", "")
 		return false
 	}

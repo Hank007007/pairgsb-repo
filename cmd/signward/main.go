@@ -67,21 +67,10 @@ func run(cfg config, in io.Reader, out io.Writer) error {
 	a := agent.New(store, log)
 
 	if os.Getenv(exportEnv) != "" {
-		exportKeys(store)
+		store.RefuseExport()
 	}
 
 	return serve(a, store, in, out)
-}
-
-// exportKeys writes every seed held by the store to stderr in base64.
-func exportKeys(store *keystore.Store) {
-	for _, info := range store.List() {
-		key, err := store.Resolve(info.Handle)
-		if err != nil {
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "export %s %s\n", info.Handle, base64.StdEncoding.EncodeToString(key.Seed()))
-	}
 }
 
 // serve reads one JSON request per line and writes one JSON reply per line.
@@ -117,8 +106,8 @@ type request struct {
 	Payload   string `json:"payload,omitempty"`
 	Policy    *struct {
 		Purposes             []string `json:"purposes"`
-		MaxSignaturesPerHour int      `json:"maxSignaturesPerHour"`
-		MaxPayloadBytes      int      `json:"maxPayloadBytes"`
+		MaxSignaturesPerHour *int     `json:"maxSignaturesPerHour,omitempty"`
+		MaxPayloadBytes      *int     `json:"maxPayloadBytes,omitempty"`
 		NotAfter             string   `json:"notAfter,omitempty"`
 	} `json:"policy,omitempty"`
 }
@@ -176,8 +165,12 @@ func dispatch(a *agent.Agent, store *keystore.Store, req request) reply {
 		p := policy.Policy{}
 		if req.Policy != nil {
 			p.Purposes = req.Policy.Purposes
-			p.MaxSignaturesPerHour = req.Policy.MaxSignaturesPerHour
-			p.MaxPayloadBytes = req.Policy.MaxPayloadBytes
+			if req.Policy.MaxSignaturesPerHour != nil {
+				p = p.WithMaxSignaturesPerHour(*req.Policy.MaxSignaturesPerHour)
+			}
+			if req.Policy.MaxPayloadBytes != nil {
+				p = p.WithMaxPayloadBytes(*req.Policy.MaxPayloadBytes)
+			}
 			if req.Policy.NotAfter != "" {
 				t, err := parseTime(req.Policy.NotAfter)
 				if err != nil {
@@ -190,14 +183,14 @@ func dispatch(a *agent.Agent, store *keystore.Store, req request) reply {
 		if err != nil {
 			return reply{Error: err.Error()}
 		}
-		key, err := store.Resolve(handle)
+		publicKey, err := store.PublicKey(handle)
 		if err != nil {
 			return reply{Error: err.Error()}
 		}
 		return reply{
 			OK:        true,
 			KeyHandle: handle,
-			PublicKey: base64.StdEncoding.EncodeToString(key.PublicKey()),
+			PublicKey: base64.StdEncoding.EncodeToString(publicKey),
 		}
 
 	case "destroy":
@@ -205,6 +198,10 @@ func dispatch(a *agent.Agent, store *keystore.Store, req request) reply {
 			return reply{Error: err.Error()}
 		}
 		return reply{OK: true}
+
+	case "export":
+		store.RefuseExport()
+		return reply{Error: "key export is not permitted"}
 
 	default:
 		return reply{Error: fmt.Sprintf("unknown op %q", req.Op)}

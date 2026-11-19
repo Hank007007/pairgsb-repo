@@ -29,6 +29,8 @@ import (
 var (
 	ErrUnknownHandle = errors.New("keystore: unknown key handle")
 	ErrEmptyID       = errors.New("keystore: key id must not be empty")
+	ErrKeyDestroyed  = errors.New("keystore: key has been destroyed")
+	ErrKeyExpired    = errors.New("keystore: key has expired")
 )
 
 // State is the lifecycle state of a loaded key.
@@ -216,14 +218,29 @@ func (s *Store) Generate(id string, p policy.Policy) (string, error) {
 	return handle, nil
 }
 
-// Resolve returns the key identified by handle.
+// Resolve returns the key identified by handle using the store's clock.
 func (s *Store) Resolve(handle string) (*Key, error) {
+	return s.ResolveAt(handle, s.now())
+}
+
+// ResolveAt returns the key identified by handle if it is still usable at
+// now. Unknown, destroyed and expired keys are refused and audited.
+func (s *Store) ResolveAt(handle string, now time.Time) (*Key, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	e, ok := s.entries[handle]
 	if !ok {
+		s.audit.RecordAt(now, audit.EventResolveDenied, handle, "", "unknown key handle")
 		return nil, ErrUnknownHandle
+	}
+	if e.state == StateDestroyed {
+		s.audit.RecordAt(now, audit.EventResolveDenied, handle, "", "key has been destroyed")
+		return nil, ErrKeyDestroyed
+	}
+	if e.policy.Expired(now) {
+		s.audit.RecordAt(now, audit.EventResolveDenied, handle, "", "key has expired")
+		return nil, ErrKeyExpired
 	}
 	return &Key{
 		Handle:    e.handle,
@@ -233,6 +250,42 @@ func (s *Store) Resolve(handle string) (*Key, error) {
 		CreatedAt: e.createdAt,
 		private:   e.private,
 	}, nil
+}
+
+// PublicKey returns a copy of the verification key for handle. It does not
+// apply the lifecycle checks used by Resolve because public keys are not
+// secret and creation needs to report one for a key that may already be past
+// its NotAfter instant.
+func (s *Store) PublicKey(handle string) (ed25519.PublicKey, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	e, ok := s.entries[handle]
+	if !ok {
+		return nil, ErrUnknownHandle
+	}
+	out := make(ed25519.PublicKey, len(e.public))
+	copy(out, e.public)
+	return out, nil
+}
+
+// RefuseExport records an audit entry for every key and never returns key
+// material. It is used when a caller attempts to request an export.
+func (s *Store) RefuseExport() {
+	s.mu.Lock()
+	handles := make([]string, 0, len(s.entries))
+	for _, e := range s.entries {
+		handles = append(handles, e.handle)
+	}
+	s.mu.Unlock()
+
+	if len(handles) == 0 {
+		s.audit.Record(audit.EventExportDenied, "", "", "key export is not permitted")
+		return
+	}
+	for _, handle := range handles {
+		s.audit.Record(audit.EventExportDenied, handle, "", "key export is not permitted")
+	}
 }
 
 // Destroy retires the key identified by handle and removes its seed file.

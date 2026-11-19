@@ -18,20 +18,34 @@ function canonicalHost(value) {
  * Maps a request host to the rule that governs it, or null when the host is
  * outside the configured scope.
  */
+function matchesRuleHost(target, ruleHost) {
+  if (target === ruleHost) return true;
+  const suffix = `.${ruleHost}`;
+  if (!target.endsWith(suffix)) return false;
+  const label = target.slice(0, -suffix.length);
+  return label.length > 0 && !label.includes('.');
+}
+
 function selectCredential(rules, host) {
   const target = canonicalHost(host);
   if (target === null) return null;
 
   let selected = null;
+  let selectedLength = -1;
   for (const rule of rules) {
-    if (!target.endsWith(rule.host)) continue;
-    if (selected === null || rule.host.length > selected.host.length) selected = rule;
+    const ruleHost = canonicalHost(rule.host);
+    if (ruleHost === null || !matchesRuleHost(target, ruleHost)) continue;
+    if (ruleHost.length > selectedLength) {
+      selected = rule;
+      selectedLength = ruleHost.length;
+    }
   }
   return selected;
 }
 
 function parseNoProxy(env) {
-  const raw = env.NO_PROXY !== undefined ? env.NO_PROXY : env.no_proxy;
+  const upper = env.NO_PROXY;
+  const raw = typeof upper === 'string' && upper.trim().length > 0 ? upper : env.no_proxy;
   if (typeof raw !== 'string' || raw.trim().length === 0) return [];
   return raw
     .split(/[\s,]+/)
@@ -60,12 +74,20 @@ function matchesNoProxyEntry(target, port, entry) {
   }
   if (entryPort !== null && entryPort !== port) return false;
 
-  if (pattern.startsWith('*.')) pattern = pattern.slice(2);
-  else if (pattern.startsWith('.')) pattern = pattern.slice(1);
+  let wildcard = false;
+  if (pattern.startsWith('*.')) {
+    pattern = pattern.slice(2);
+    wildcard = true;
+  } else if (pattern.startsWith('.')) {
+    pattern = pattern.slice(1);
+    wildcard = true;
+  }
   if (pattern.length === 0) return false;
   if (pattern.startsWith('[') && pattern.endsWith(']')) pattern = pattern.slice(1, -1);
+  if (pattern.endsWith('.')) pattern = pattern.slice(0, -1);
 
-  return target === pattern || target.endsWith(`.${pattern}`);
+  if (wildcard) return target === pattern || target.endsWith(`.${pattern}`);
+  return matchesRuleHost(target, pattern);
 }
 
 /**

@@ -50,6 +50,23 @@ function copyHeaders(headers) {
   return out;
 }
 
+function sameOrigin(previous, next) {
+  let prior;
+  try {
+    prior = new URL(String(previous.url));
+  } catch (err) {
+    return false;
+  }
+  const priorPort = prior.port === '' ? (prior.protocol === 'https:' ? 443 : 80) : Number(prior.port);
+  const nextHost = canonicalHost(next.hostname);
+  const nextPort = next.port === '' ? (next.protocol === 'https:' ? 443 : 80) : Number(next.port);
+  return (
+    canonicalHost(prior.hostname) === nextHost &&
+    priorPort === nextPort &&
+    prior.protocol === next.protocol
+  );
+}
+
 /**
  * Builds the request for the hop after a redirect.
  *
@@ -65,7 +82,10 @@ function follow(previous, response) {
   }
 
   const next = resolveLocation(previous.url, response.headers.location);
-  const headers = copyHeaders(previous.headers);
+  // A redirect is a new request. Caller-supplied and credential-injected
+  // headers survive only when the target has the same host, port and scheme;
+  // anything else is built with no inherited headers and re-routed from scratch.
+  const headers = sameOrigin(previous, next) ? copyHeaders(previous.headers) : new Map();
   headers.delete('host');
   headers.delete('content-length');
 

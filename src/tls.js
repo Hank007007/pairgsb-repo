@@ -9,14 +9,6 @@ const { clientMaterial } = require('./vault');
 let cachedCa = null;
 let cachedCaFile = null;
 
-function insecureRequested() {
-  const raw = process.env.EGRESS_TLS_INSECURE;
-  if (raw === undefined) return true;
-  const value = raw.trim().toLowerCase();
-  if (value === '' || value === '0' || value === 'false' || value === 'no') return false;
-  return true;
-}
-
 function loadTrustAnchors(caFile) {
   const file = caFile !== undefined && caFile !== null ? caFile : process.env.EGRESS_CA_FILE;
   if (typeof file !== 'string' || file.length === 0) return null;
@@ -37,7 +29,7 @@ function agentOptions(options) {
   const params = {
     keepAlive: false,
     servername: host,
-    rejectUnauthorized: !insecureRequested(),
+    rejectUnauthorized: true,
   };
 
   const ca = loadTrustAnchors(options.caFile);

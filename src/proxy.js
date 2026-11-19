@@ -36,14 +36,16 @@ function envValue(env, name) {
  * Picks the upstream proxy for a hop, if one is configured.
  */
 function selectProxy(hop, env) {
-  const schemeVar = hop.protocol === 'https:' ? 'HTTPS_PROXY' : 'HTTP_PROXY';
-  const forScheme = envValue(env, schemeVar);
+  if (matchesNoProxy(hop.host, hop.port, env)) return null;
+
+  const httpsHop = hop.protocol === 'https:';
+  const forScheme =
+    envValue(env, httpsHop ? 'HTTPS_PROXY' : 'HTTP_PROXY') ||
+    envValue(env, httpsHop ? 'https_proxy' : 'http_proxy');
   if (forScheme !== null) return new URL(forScheme);
 
-  const catchAll = envValue(env, 'ALL_PROXY');
-  if (catchAll === null) return null;
-  if (matchesNoProxy(hop.host, hop.port, env)) return null;
-  return new URL(catchAll);
+  const catchAll = envValue(env, 'ALL_PROXY') || envValue(env, 'all_proxy');
+  return catchAll === null ? null : new URL(catchAll);
 }
 
 function headerEntriesToMap(rawHeaders) {
@@ -405,7 +407,6 @@ function createProxy(options) {
         status: upstream === null ? null : upstream.statusCode,
         durationMs: Date.now() - started,
         keyId: credential === null ? null : credential.keyId,
-        headers: hop.headers,
         error,
       });
 

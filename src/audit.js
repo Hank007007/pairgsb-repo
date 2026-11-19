@@ -25,20 +25,6 @@ function errorCode(err) {
   return 'EUNKNOWN';
 }
 
-function headersToPlainObject(headers) {
-  const out = {};
-  if (headers instanceof Map) {
-    for (const [lower, entry] of headers) {
-      out[lower] = entry && typeof entry === 'object' ? entry.value : entry;
-    }
-    return out;
-  }
-  if (headers && typeof headers === 'object') {
-    for (const [name, value] of Object.entries(headers)) out[name.toLowerCase()] = value;
-  }
-  return out;
-}
-
 /**
  * Appends one record per hop to the audit file. The file is opened lazily and
  * kept for the lifetime of the process; each record is written with a single
@@ -67,7 +53,6 @@ function createAuditLog(options) {
       status: Number.isInteger(record.status) ? record.status : null,
       durationMs: typeof record.durationMs === 'number' ? Math.round(record.durationMs * 1000) / 1000 : null,
       keyId: record.keyId || null,
-      headers: headersToPlainObject(record.headers),
       error: errorCode(record.error),
     };
 

@@ -26,7 +26,7 @@ from .canonical import (
     header_digest,
     percent_encode,
 )
-from .clock import expires_at
+from .clock import MAX_TTL, expires_at
 from .errors import PolicyError
 from .policy import (
     Policy,
@@ -86,6 +86,11 @@ def presign(
     method = str(method).upper()
     resource = _normalise_resource(resource)
     target = _normalise_resource(target) if target is not None else None
+    ttl_seconds = int(ttl)
+    if ttl_seconds > MAX_TTL:
+        raise PolicyError(
+            f"ttl {ttl_seconds} exceeds the maximum of {MAX_TTL} seconds"
+        )
 
     check_method(policy, method)
     check_resource(policy, resource)
@@ -105,7 +110,7 @@ def presign(
         sorted({*policy.signed_headers, *bound_headers})
     )
     digest = header_digest(bound_headers, signed_names)
-    deadline = expires_at(ttl, now)
+    deadline = expires_at(ttl_seconds, now)
 
     pairs: list[tuple[str, str]] = [
         (percent_encode(ALGORITHM_PARAM), percent_encode(ALGORITHM)),

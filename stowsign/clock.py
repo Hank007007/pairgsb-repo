@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import time
 
+MAX_TTL = 604800
+
 
 def now_ts(now: int | None = None) -> int:
     """Return ``now`` as an epoch timestamp, defaulting to the wall clock."""
@@ -25,5 +27,5 @@ def expires_at(ttl: int | str, now: int | None = None) -> int:
 def is_expired(expires: str | int, now: int | None = None) -> bool:
     """Decide whether a grant carrying ``expires`` is past its deadline."""
     current = now_ts(now)
-    deadline = current + int(expires)
+    deadline = int(expires)
     return current >= deadline

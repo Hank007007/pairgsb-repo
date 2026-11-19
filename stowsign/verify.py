@@ -24,6 +24,7 @@ from .canonical import (
     build_canonical_request,
     canonical_query,
     compute_signature,
+    header_digest,
 )
 from .clock import is_expired
 from .errors import ExpiredError, SignatureError
@@ -123,6 +124,9 @@ def verify(
     verify_signed_headers(headers, signed_names)
 
     digest = _single(params, HEADER_DIGEST_PARAM)
+    actual_digest = header_digest(headers, signed_names)
+    if not hmac.compare_digest(actual_digest, digest):
+        raise SignatureError("signed header digest does not match")
     resource = _single(params, RESOURCE_PARAM).strip().strip("/")
     target = (
         _single(params, TARGET_PARAM).strip().strip("/")
@@ -139,9 +143,7 @@ def verify(
         check_required_headers(policy, signed_names)
         check_ip(policy, client_ip)
 
-    canonical = canonical_query(
-        [(key, value) for key, value in pairs if key != SIGNATURE_PARAM]
-    )
+    canonical = canonical_query(pairs)
     canonical_request = build_canonical_request(method, path, canonical, digest)
     expected = compute_signature(secret, canonical_request)
 

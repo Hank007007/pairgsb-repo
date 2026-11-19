@@ -77,7 +77,7 @@ def check_resource(policy: Policy, resource: str) -> None:
         return
     candidate = str(resource).strip().strip("/")
     for prefix in policy.resources:
-        if candidate.startswith(prefix):
+        if candidate == prefix or candidate.startswith(prefix + "/"):
             return
     raise PolicyError(f"resource {resource!r} is not allowed by the policy")
 
@@ -87,15 +87,19 @@ def check_ip(policy: Policy, client_ip: str | None) -> None:
     if not policy.ip_cidrs:
         return
     try:
-        address = ipaddress.IPv4Address(str(client_ip))
+        address = ipaddress.ip_address(str(client_ip))
     except (ValueError, TypeError):
-        return
+        raise PolicyError(
+            f"client address {client_ip!r} is not allowed by the policy"
+        ) from None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        address = address.ipv4_mapped
     for cidr in policy.ip_cidrs:
         try:
-            network = ipaddress.IPv4Network(cidr, strict=False)
+            network = ipaddress.ip_network(cidr, strict=False)
         except (ValueError, TypeError):
             continue
-        if address in network:
+        if address.version == network.version and address in network:
             return
     raise PolicyError(f"client address {client_ip!r} is not allowed by the policy")
 

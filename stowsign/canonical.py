@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 from typing import Iterable, Mapping, Sequence
-from urllib.parse import quote, unquote
+from urllib.parse import quote
 
 ALGORITHM = "STOW-HMAC-SHA256"
 SIGNATURE_PARAM = "X-Stow-Signature"
@@ -33,11 +33,19 @@ def canonical_query(pairs: Iterable[tuple[str, str]]) -> str:
 
     ``pairs`` are the on-the-wire key/value strings of the query, in the
     order they appeared.  The canonical form is what the signature covers.
+    The strings are used exactly as supplied: no decoding or re-encoding is
+    performed, so ``%2F`` and ``/`` remain distinct inputs.  Pairs are sorted
+    by their raw key and then raw value bytes, and the signature parameter
+    itself is excluded.
     """
+    pairs = [
+        (str(key), str(value))
+        for key, value in pairs
+        if str(key) != SIGNATURE_PARAM
+    ]
+    pairs.sort(key=lambda item: (item[0].encode("utf-8"), item[1].encode("utf-8")))
     parts = []
     for key, value in pairs:
-        key = unquote(str(key))
-        value = unquote(str(value))
         parts.append(f"{key}={value}")
     return "&".join(parts)
 

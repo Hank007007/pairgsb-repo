@@ -5,42 +5,37 @@ import (
 	"strings"
 )
 
-// maxSubstPasses bounds how many times a template is walked while looking for
-// placeholders.
-const maxSubstPasses = 32
-
 // expandPlaceholders substitutes ${INPUT_name} references in tmpl with the
 // matching value from inputs.
 //
 // A reference is ${INPUT_ followed by one or more [A-Za-z0-9_] characters and
 // a closing brace. Anything that does not match that shape is kept as literal
 // text.
+//
+// Substitution is a single left-to-right pass: a value that is written into
+// the output is never scanned again, so ${INPUT_other} or ${ sequences inside
+// a value survive verbatim (policy §2.1).
 func expandPlaceholders(tmpl string, inputs map[string]string) (string, error) {
-	out := tmpl
-	for pass := 0; pass < maxSubstPasses && strings.Contains(out, "${"); pass++ {
-		var b strings.Builder
-		b.Grow(len(out))
-		for i := 0; i < len(out); {
-			name, width, ok := placeholderAt(out, i)
-			if !ok {
-				b.WriteByte(out[i])
-				i++
-				continue
-			}
-			value, exists := inputs[name]
-			if !exists {
-				return "", fmt.Errorf("%w: ${INPUT_%s}", ErrUnknownPlaceholder, name)
-			}
-			b.WriteString(value)
-			i += width
-		}
-		next := b.String()
-		if next == out {
-			break
-		}
-		out = next
+	if !strings.Contains(tmpl, "${") {
+		return tmpl, nil
 	}
-	return out, nil
+	var b strings.Builder
+	b.Grow(len(tmpl))
+	for i := 0; i < len(tmpl); {
+		name, width, ok := placeholderAt(tmpl, i)
+		if !ok {
+			b.WriteByte(tmpl[i])
+			i++
+			continue
+		}
+		value, exists := inputs[name]
+		if !exists {
+			return "", fmt.Errorf("%w: ${INPUT_%s}", ErrUnknownPlaceholder, name)
+		}
+		b.WriteString(value)
+		i += width
+	}
+	return b.String(), nil
 }
 
 // placeholderAt reports whether a placeholder starts at offset i. It returns
@@ -75,13 +70,3 @@ func isNameByte(c byte) bool {
 	return false
 }
 
-// flattenArgs re-splits rendered arguments on whitespace for the
-// compatibility path, where one template argument used to stand for a whole
-// command fragment.
-func flattenArgs(args []string) []string {
-	out := make([]string, 0, len(args))
-	for _, arg := range args {
-		out = append(out, strings.Fields(arg)...)
-	}
-	return out
-}

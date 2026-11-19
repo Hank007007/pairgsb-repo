@@ -61,7 +61,8 @@ type BuildResult struct {
 	// were discarded because they are not on the allowlist.
 	DroppedEnv []string
 
-	// UsedLegacy reports whether the build took the compatibility path.
+	// UsedLegacy is retained for the public contract. It is always false:
+	// the shell compatibility path was removed (policy §1.4).
 	UsedLegacy bool
 }
 
@@ -80,12 +81,15 @@ func Build(plan StepPlan) (BuildResult, error) {
 	if err != nil {
 		return BuildResult{}, err
 	}
+	if err := validateWorkdir(workdir); err != nil {
+		return BuildResult{}, err
+	}
 
-	argv, env, dropped, legacy, err := buildPlan(plan, base)
+	argv, env, dropped, err := buildPlan(plan, base)
 	if err != nil {
 		return BuildResult{}, err
 	}
-	if err := validateExecutable(argv); err != nil {
+	if err := validateArgv(argv); err != nil {
 		return BuildResult{}, err
 	}
 
@@ -101,104 +105,82 @@ func Build(plan StepPlan) (BuildResult, error) {
 		Argv:       append([]string(nil), argv...),
 		Env:        append([]string(nil), env...),
 		DroppedEnv: dropped,
-		UsedLegacy: legacy,
 	}, nil
 }
 
 // buildPlan renders a plan and returns the argv and env handed to the
-// process. It returns the same shape for the regular and the compatibility
-// path.
-func buildPlan(plan StepPlan, baseEnv []string) (argv []string, env []string, dropped []string, legacy bool, err error) {
+// process.
+func buildPlan(plan StepPlan, baseEnv []string) (argv []string, env []string, dropped []string, err error) {
 	executable, err := expandPlaceholders(plan.Executable, plan.Inputs)
 	if err != nil {
-		return nil, nil, nil, false, err
+		return nil, nil, nil, err
 	}
 	if executable == "" {
-		return nil, nil, nil, false, ErrEmptyExecutable
+		return nil, nil, nil, ErrEmptyExecutable
 	}
 
 	args := make([]string, 0, len(plan.Args))
 	for _, tmpl := range plan.Args {
 		value, err := expandPlaceholders(tmpl, plan.Inputs)
 		if err != nil {
-			return nil, nil, nil, false, err
+			return nil, nil, nil, err
 		}
 		args = append(args, value)
 	}
 
 	positionals := make([]string, 0, len(plan.Positionals))
-	for i, tmpl := range plan.Positionals {
+	for _, tmpl := range plan.Positionals {
 		value, err := expandPlaceholders(tmpl, plan.Inputs)
 		if err != nil {
-			return nil, nil, nil, false, err
+			return nil, nil, nil, err
 		}
-		positionals = append(positionals, sanitizeArg(i, value))
+		positionals = append(positionals, value)
 	}
 
 	env, dropped = mergeEnv(baseEnv, plan.Env)
 
-	// Older plugins emit composite command lines such as "make lint | tee
-	// build.log" as a single argument. Those are handed to the system shell so
-	// that they keep working after the move to declared argv.
-	for _, arg := range args {
-		if !hasShellSyntax(arg) {
-			continue
-		}
-		line := strings.Join(flattenArgs(args), " ")
-		if len(positionals) > 0 {
-			line += " " + strings.Join(positionals, " ")
-		}
-		return []string{shellPath(), "-c", line}, env, dropped, true, nil
-	}
-
 	argv = argvFromPlan(executable, args, positionals, plan.HasPositionals)
-	return argv, env, dropped, false, nil
+	return argv, env, dropped, nil
 }
 
 // argvFromPlan assembles the argv handed to exec.Cmd from the rendered
-// arguments and the trailing positionals.
+// arguments and the trailing positionals. When the declaration carries a
+// positionals field, a single "--" separates the template arguments from the
+// positional arguments (policy §4.1).
 func argvFromPlan(executable string, args, positionals []string, hasPositionals bool) []string {
-	argv := make([]string, 0, len(args)+len(positionals)+3)
+	argv := make([]string, 0, len(args)+len(positionals)+2)
 	argv = append(argv, executable)
 	argv = append(argv, args...)
-	argv = append(argv, positionals...)
 	if hasPositionals {
 		argv = append(argv, "--")
 	}
+	argv = append(argv, positionals...)
 	return argv
 }
 
-// validateExecutable checks the program path before the command is handed
-// back. A NUL byte there would cut the path short when the operating system
-// looks the file up.
-func validateExecutable(argv []string) error {
-	if len(argv) == 0 {
-		return nil
-	}
-	if strings.ContainsRune(argv[0], '\x00') {
-		return fmt.Errorf("%w: argv[0]", ErrNulInArg)
+// validateArgv checks every element of the final argv before the command is
+// handed back, including argv[0] and everything on both sides of "--"
+// (policy §5.3). The error carries the element's index, never its content.
+func validateArgv(argv []string) error {
+	for i, arg := range argv {
+		if strings.ContainsRune(arg, '\x00') {
+			return fmt.Errorf("%w: argv[%d]", ErrNulInArg, i)
+		}
+		if strings.ContainsRune(arg, '\n') {
+			return fmt.Errorf("%w: argv[%d]", ErrNewlineInArg, i)
+		}
 	}
 	return nil
 }
 
-// shellPath returns the system shell used by the compatibility path.
-func shellPath() string {
-	if path, err := exec.LookPath("sh"); err == nil {
-		return path
+// validateWorkdir applies the §5 character checks to the rendered working
+// directory (policy §8.2).
+func validateWorkdir(workdir string) error {
+	if strings.ContainsRune(workdir, '\x00') {
+		return fmt.Errorf("%w: workdir", ErrNulInArg)
 	}
-	return "sh"
-}
-
-// hasShellSyntax reports whether the rendered argument looks like it was
-// meant for a shell pipeline.
-func hasShellSyntax(arg string) bool {
-	return strings.ContainsAny(arg, "|&;") || strings.Contains(arg, "$(")
-}
-
-// sanitizeArg keeps positionals from being mistaken for options.
-func sanitizeArg(index int, value string) string {
-	if index != 0 {
-		return value
+	if strings.ContainsRune(workdir, '\n') {
+		return fmt.Errorf("%w: workdir", ErrNewlineInArg)
 	}
-	return strings.TrimPrefix(value, "-")
+	return nil
 }

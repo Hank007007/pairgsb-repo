@@ -1,0 +1,19 @@
+{
+  "global": [
+    { "version": 1, "secret": "global-0f1e2d" }
+  ],
+  "demo": [
+    { "version": 1, "secret": "demo-secret" }
+  ],
+  "acme": [
+    { "version": 2, "secret": "acme-v2-9f2c1d" },
+    { "version": 1, "secret": "acme-v1-4b8e2f", "not_after": 1767225600 }
+  ],
+  "media": [
+    { "version": 2, "secret": "media-v2-77aa19" },
+    { "version": 1, "secret": "media-v1-c0ffee", "not_after": 1767225600 }
+  ],
+  "legacy": [
+    { "version": 9, "secret": "legacy-retired-5a5a", "not_after": 1600000000 }
+  ]
+}

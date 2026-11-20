@@ -1,0 +1,19 @@
+{
+  "name": "urlseal-presign",
+  "version": "0.3.0",
+  "description": "HMAC presigned URL service for object storage: issue and verify X-Seal-* links.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./keys": "./src/keys.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "private": true
+}

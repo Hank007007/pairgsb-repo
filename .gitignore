@@ -1,0 +1,32 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# pytest
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# virtual environments
+.venv/
+venv/
+env/
+
+# editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# local scratch output
+replay.out
+.build.prompt.txt

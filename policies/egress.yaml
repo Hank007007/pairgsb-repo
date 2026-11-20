@@ -1,0 +1,43 @@
+# Egress policy for the forward proxy.
+#
+# Rules are evaluated in order and the first rule that matches decides.  Host
+# entries are compared against the canonical host produced by
+# hostfold.canonicalize; suffix entries match a host and all of its
+# subdomains.
+
+version: 1
+default: allow
+
+rules:
+  - name: deny-loopback-v4
+    action: deny
+    hosts:
+      - "127.0.0.1"
+
+  - name: deny-link-local
+    action: deny
+    hosts:
+      - "169.254.169.254"
+
+  - name: deny-loopback-v6
+    action: deny
+    hosts:
+      - "[::1]"
+
+  - name: deny-metadata
+    action: deny
+    hosts:
+      - "metadata.internal"
+      - "localhost"
+    suffixes:
+      - "internal"
+
+  - name: allow-trusted
+    action: allow
+    suffixes:
+      - "trusted.example"
+
+  - name: deny-example-tld
+    action: deny
+    suffixes:
+      - "example"

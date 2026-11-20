@@ -1,0 +1,37 @@
+[
+  {
+    "name": "thread reply with link and emphasis",
+    "input": "<p>Thanks <strong>@ada</strong> — see <a href=\"/posts/42\" title=\"the thread\">this thread</a>.</p>",
+    "output": "<p>Thanks <strong>@ada</strong> — see <a href=\"/posts/42\" title=\"the thread\">this thread</a>.</p>"
+  },
+  {
+    "name": "fenced code block",
+    "input": "<pre><code>const x = a &lt; b;\nconsole.log(\"ready\");\n</code></pre>",
+    "output": "<pre><code>const x = a &lt; b;\nconsole.log(\"ready\");\n</code></pre>"
+  },
+  {
+    "name": "image with caption alt text",
+    "input": "<p><img src=\"/uploads/diagram.png\" alt=\"A diagram\" width=\"640\" height=\"360\"></p>",
+    "output": "<p><img src=\"/uploads/diagram.png\" alt=\"A diagram\" width=\"640\" height=\"360\"></p>"
+  },
+  {
+    "name": "nested list",
+    "input": "<ul><li>first</li><li>second<ol><li>nested</li></ol></li></ul>",
+    "output": "<ul><li>first</li><li>second<ol><li>nested</li></ol></li></ul>"
+  },
+  {
+    "name": "block quote with line break",
+    "input": "<blockquote><p>Quoted <em>text</em><br>continues here.</p></blockquote>",
+    "output": "<blockquote><p>Quoted <em>text</em><br>continues here.</p></blockquote>"
+  },
+  {
+    "name": "mailto link",
+    "input": "<p>Write to <a href=\"mailto:mods@example.com\">the mods</a>.</p>",
+    "output": "<p>Write to <a href=\"mailto:mods@example.com\">the mods</a>.</p>"
+  },
+  {
+    "name": "user class on paragraph",
+    "input": "<p class=\"user-note\">Pinned note.</p>",
+    "output": "<p class=\"user-note\">Pinned note.</p>"
+  }
+]

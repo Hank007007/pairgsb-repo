@@ -20,18 +20,23 @@ function createGrantService(options) {
 
   return {
     issue(request) {
-      return issue(request, { policies, now });
+      return issue(request, { policies, now, store });
     },
 
     verify(token, context = {}) {
       return verify(token, {
         ...context,
         now: context.now ?? now(),
+        store,
       });
     },
 
     revoke(tenantId, grantId) {
       store.revoke(tenantId, grantId);
+    },
+
+    revokeAll(tenantId) {
+      store.revokeAll(tenantId);
     },
 
     generation(tenantId) {

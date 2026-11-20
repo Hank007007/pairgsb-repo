@@ -1,28 +1,26 @@
 'use strict';
 
+const crypto = require('node:crypto');
+
 const { encodeGrant } = require('../codec');
-const { PathError, normalize, isWithin } = require('../pathnorm/norm');
-const { loadPolicy } = require('../policy/tenant');
+const { PathError, resolveAgainst, isWithin } = require('../pathnorm/norm');
+const { PolicyError, loadPolicy } = require('../policy/tenant');
 
 const BUILTIN_DEFAULT_TTL_MS = 15 * 60 * 1000;
 
-let lastIdKey = null;
-let lastId = '';
-
 /**
  * Mint an identifier for a newly issued grant.
+ *
+ * The identifier may carry the issue time, but the time alone does not
+ * distinguish two grants minted in the same millisecond, so a random part
+ * from a cryptographically secure source is always included.
  *
  * @param {string} tenantId
  * @param {number} issuedAtMs
  * @returns {string}
  */
 function idFor(tenantId, issuedAtMs) {
-  const key = `${tenantId}@${issuedAtMs}`;
-  if (key !== lastIdKey) {
-    lastIdKey = key;
-    lastId = Math.random().toString(36).slice(2, 10);
-  }
-  return lastId;
+  return `${tenantId}:${issuedAtMs}:${crypto.randomBytes(16).toString('base64url')}`;
 }
 
 /**
@@ -38,6 +36,7 @@ function idFor(tenantId, issuedAtMs) {
  * @param {{
  *   policies: { get(tenantId: string): object | undefined },
  *   now: () => number,
+ *   store?: { generation(tenantId: string): number },
  * }} deps
  * @returns {{ token: string, grant: object }}
  */
@@ -67,26 +66,45 @@ function issue(request, deps) {
   }
 
   const policy = loadPolicy(deps.policies, tenantId);
-  const root = policy.root ?? '/';
+  if (typeof policy.root !== 'string' || policy.root.length === 0) {
+    throw new PolicyError(`policy for tenant ${tenantId} is missing a root`);
+  }
+  if (!Array.isArray(policy.adminActions) || policy.adminActions.length === 0) {
+    throw new PolicyError(`policy for tenant ${tenantId} is missing adminActions`);
+  }
+  const root = policy.root;
   const defaultTtlMs = policy.defaultTtlMs ?? BUILTIN_DEFAULT_TTL_MS;
+  const maxTtlMs = policy.maxTtlMs ?? Infinity;
 
-  const normalizedPath = normalize(requestedPath);
+  const normalizedPath = resolveAgainst(root, requestedPath);
   if (!isWithin(root, normalizedPath)) {
     throw new PathError(`path is outside the tenant root: ${requestedPath}`);
   }
 
-  const grantedActions = Array.from(new Set(actions));
-  const effectiveTtlMs = Math.max(ttlMs ?? defaultTtlMs, defaultTtlMs);
+  const grantedActions = Array.from(
+    new Set(actions.filter((action) => policy.adminActions.includes(action))),
+  );
+  if (grantedActions.length === 0) {
+    throw new PolicyError(
+      `none of the requested actions are permitted for tenant ${tenantId}`,
+    );
+  }
+
+  const effectiveTtlMs = Math.min(ttlMs ?? defaultTtlMs, defaultTtlMs, maxTtlMs);
+  if (!Number.isFinite(effectiveTtlMs) || effectiveTtlMs <= 0) {
+    throw new PolicyError(`policy for tenant ${tenantId} allows no positive ttl`);
+  }
 
   const issuedAtMs = deps.now();
   const grant = {
-    id: idFor(issuedAtMs),
+    id: idFor(tenantId, issuedAtMs),
     tenantId,
     path: normalizedPath,
     actions: grantedActions,
     ttlMs: effectiveTtlMs,
     issuedAtMs,
     expiresAtMs: issuedAtMs + effectiveTtlMs,
+    revocationEpoch: deps.store ? deps.store.generation(tenantId) : 0,
   };
 
   return { token: encodeGrant(grant), grant };

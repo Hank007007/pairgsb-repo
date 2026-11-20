@@ -1,21 +1,19 @@
 'use strict';
 
 const { decodeGrant } = require('../codec');
-const { normalize } = require('../pathnorm/norm');
+const { normalize, isWithin } = require('../pathnorm/norm');
 
 /**
  * Decide whether a requested action is covered by the actions recorded in a
- * grant.
+ * grant. Matching is by exact string only: substrings, prefixes and case
+ * variants do not count.
  *
  * @param {string[]} grantedActions
  * @param {string} action
  * @returns {boolean}
  */
 function actionMatches(grantedActions, action) {
-  if (grantedActions.indexOf(action) >= 0) {
-    return true;
-  }
-  return grantedActions.some((granted) => action.includes(granted));
+  return grantedActions.indexOf(action) >= 0;
 }
 
 /**
@@ -27,6 +25,10 @@ function actionMatches(grantedActions, action) {
  *   requestPath: string,
  *   tenantId?: string,
  *   now?: number,
+ *   store?: {
+ *     isRevoked(tenantId: string, grantId: string): boolean,
+ *     generation(tenantId: string): number,
+ *   },
  * }} context
  * @returns {{ ok: boolean, reason?: string, grant?: object }}
  */
@@ -35,6 +37,15 @@ function verify(token, context = {}) {
   try {
     grant = decodeGrant(token);
   } catch {
+    return { ok: false, reason: 'malformed' };
+  }
+  if (
+    typeof grant.id !== 'string' ||
+    typeof grant.tenantId !== 'string' ||
+    typeof grant.path !== 'string' ||
+    !Array.isArray(grant.actions) ||
+    typeof grant.expiresAtMs !== 'number'
+  ) {
     return { ok: false, reason: 'malformed' };
   }
 
@@ -46,22 +57,40 @@ function verify(token, context = {}) {
     return { ok: false, reason: 'bad-request' };
   }
 
-  const nowMs = Date.now();
-  if (nowMs > grant.expiresAtMs) {
-    return { ok: false, reason: 'expired' };
-  }
-
-  const grantedActions = Array.isArray(grant.actions) ? grant.actions : [];
-  if (!actionMatches(grantedActions, action)) {
-    return { ok: false, reason: 'action-not-granted' };
-  }
-
   if (typeof context.tenantId === 'string' && context.tenantId !== grant.tenantId) {
     return { ok: false, reason: 'tenant-mismatch' };
   }
 
-  const targetPath = normalize(requestPath);
-  if (!targetPath.startsWith(grant.path)) {
+  const store = context.store;
+  if (store) {
+    const epoch = typeof grant.revocationEpoch === 'number' ? grant.revocationEpoch : 0;
+    if (store.generation(grant.tenantId) > epoch || store.isRevoked(grant.tenantId, grant.id)) {
+      return { ok: false, reason: 'revoked' };
+    }
+  }
+
+  const nowMs = typeof context.now === 'number' ? context.now : Date.now();
+  if (nowMs >= grant.expiresAtMs) {
+    return { ok: false, reason: 'expired' };
+  }
+
+  if (!actionMatches(grant.actions, action)) {
+    return { ok: false, reason: 'action-not-granted' };
+  }
+
+  let grantedPath;
+  try {
+    grantedPath = normalize(grant.path);
+  } catch {
+    return { ok: false, reason: 'malformed' };
+  }
+  let targetPath;
+  try {
+    targetPath = normalize(requestPath);
+  } catch {
+    return { ok: false, reason: 'path-not-granted' };
+  }
+  if (!isWithin(grantedPath, targetPath)) {
     return { ok: false, reason: 'path-not-granted' };
   }
 

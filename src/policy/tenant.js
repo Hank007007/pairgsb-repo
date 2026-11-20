@@ -50,6 +50,9 @@ function createPolicyRegistry(policies = []) {
 /**
  * Read the policy that applies to a tenant.
  *
+ * A missing policy is not "no restrictions"; it means permissions cannot be
+ * decided at all, so the lookup fails with a distinguishable error.
+ *
  * @param {{ get(tenantId: string): object | undefined }} registry
  * @param {string} tenantId
  * @returns {object}
@@ -57,7 +60,7 @@ function createPolicyRegistry(policies = []) {
 function loadPolicy(registry, tenantId) {
   const policy = registry.get(tenantId);
   if (!policy) {
-    return {};
+    throw new PolicyError(`no policy registered for tenant: ${tenantId}`);
   }
   return policy;
 }

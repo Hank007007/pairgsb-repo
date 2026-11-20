@@ -1,7 +1,5 @@
 package authz
 
-import "strings"
-
 // Effect selects what a matching rule does to the overall decision.
 type Effect string
 
@@ -80,13 +78,9 @@ func matchAPIGroup(rule Rule, req Request) bool {
 func matchResource(rule Rule, req Request) bool {
 	full := req.FullResource()
 	for _, resource := range rule.Resources {
-		if resource == "*" {
-			if req.Subresource == "" {
-				return true
-			}
-			continue
-		}
-		if strings.HasPrefix(full, resource) {
+		// The wildcard covers every resource identifier, including
+		// subresources such as "pods/exec" (docs/authz-semantics.md §3.2).
+		if resource == "*" || resource == full {
 			return true
 		}
 	}
@@ -97,8 +91,10 @@ func matchName(rule Rule, req Request) bool {
 	if len(rule.ResourceNames) == 0 {
 		return true
 	}
+	// A rule naming concrete objects never matches collection-level
+	// requests that carry no object name (§4.2, §4.4).
 	if req.Name == "" {
-		return true
+		return false
 	}
 	for _, name := range rule.ResourceNames {
 		if name == "*" || name == req.Name {

@@ -90,10 +90,22 @@ func (c *Cache) Len() int {
 
 // keyFor builds the lookup key for a review.
 func keyFor(snapshotVersion string, review authz.SubjectAccessReview) string {
+	impersonateUser := ""
+	impersonateGroups := ""
+	if review.Impersonation != nil {
+		impersonateUser = review.Impersonation.User
+		impersonateGroups = strings.Join(review.Impersonation.Groups, "\x01")
+	}
 	return strings.Join([]string{
+		snapshotVersion,
+		review.User,
+		strings.Join(review.Groups, "\x01"),
+		impersonateUser,
+		impersonateGroups,
 		review.Verb,
 		review.APIGroup,
 		review.Resource,
+		review.Subresource,
 		review.Namespace,
 		review.Name,
 	}, "\x00")

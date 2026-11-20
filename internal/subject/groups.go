@@ -22,29 +22,36 @@ type Directory struct {
 // Expand returns the groups a subject belongs to, given the groups supplied in
 // the review.
 func (d *Directory) Expand(user string, reviewGroups []string) []string {
-	result := make([]string, 0, len(reviewGroups)+4)
-	for _, group := range reviewGroups {
-		result = appendUnique(result, group)
-		for _, child := range d.Groups[group] {
-			result = appendUnique(result, child)
+	seen := map[string]bool{SystemAuthenticated: true}
+	result := []string{SystemAuthenticated}
+
+	// BFS over the group inclusion graph so expansion reaches a fixed point
+	// and cycles terminate: every group is visited at most once (§1.2).
+	queue := make([]string, 0, len(reviewGroups)+len(d.Users[user]))
+	enqueue := func(group string) {
+		if group == "" || seen[group] {
+			return
 		}
+		seen[group] = true
+		result = append(result, group)
+		queue = append(queue, group)
+	}
+
+	for _, group := range reviewGroups {
+		enqueue(group)
 	}
 	for _, group := range d.Users[user] {
-		result = appendUnique(result, group)
+		enqueue(group)
+	}
+
+	for len(queue) > 0 {
+		group := queue[0]
+		queue = queue[1:]
 		for _, child := range d.Groups[group] {
-			result = appendUnique(result, child)
+			enqueue(child)
 		}
 	}
 	return result
-}
-
-func appendUnique(values []string, value string) []string {
-	for _, existing := range values {
-		if existing == value {
-			return values
-		}
-	}
-	return append(values, value)
 }
 
 // LoadDirectory reads a groups.yaml file from disk.

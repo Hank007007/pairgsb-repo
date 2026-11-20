@@ -57,11 +57,12 @@ func Evaluate(req Request, identity Identity, bindings []Binding) Result {
 		}
 	}
 
-	if allowReason != "" {
-		return Result{Decision: DecisionAllow, Reason: allowReason}
-	}
+	// Deny wins regardless of evaluation order (§5.2, §5.5).
 	if denyReason != "" {
 		return Result{Decision: DecisionDeny, Reason: denyReason}
+	}
+	if allowReason != "" {
+		return Result{Decision: DecisionAllow, Reason: allowReason}
 	}
 	return Result{Decision: DecisionNoOpinion, Reason: "no matching rule"}
 }

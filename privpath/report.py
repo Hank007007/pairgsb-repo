@@ -10,7 +10,7 @@ HEADER = "privpath diff report"
 
 def render(diff: Diff, before_label: str, after_label: str) -> str:
     """Render *diff* with a fixed header and one line per finding."""
-    findings = _select(diff.findings)
+    findings = sorted(diff.findings, key=_sort_key)
     lines = [
         HEADER,
         f"before: {before_label}",
@@ -23,27 +23,32 @@ def render(diff: Diff, before_label: str, after_label: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _select(findings: tuple[Finding, ...]) -> list[Finding]:
-    selected: list[Finding] = []
-    seen: set[tuple[str, str]] = set()
-    for finding in findings:
-        key = (finding.principal, finding.action)
-        if key in seen:
-            continue
-        seen.add(key)
-        selected.append(finding)
-    return selected
+def _sort_key(finding: Finding) -> tuple:
+    return (
+        0 if severity(finding) == "high" else 1,
+        finding.principal,
+        finding.kind,
+        finding.action,
+        finding.resource,
+        finding.path,
+    )
 
 
 def _line(finding: Finding) -> str:
     return (
-        f"low {finding.kind} {finding.principal} {finding.action} "
+        f"{severity(finding)} {finding.kind} {finding.principal} {finding.action} "
         f"{finding.resource} via {' -> '.join(finding.path)}"
     )
 
 
 def severity(finding: Finding) -> str:
     """Return the level of *finding*."""
+    if finding.kind == "deny-removed":
+        return "high"
+    if finding.kind == "add" and (
+        "*" in finding.resource or finding.action == "admin"
+    ):
+        return "high"
     return "low"
 
 

@@ -10,17 +10,17 @@ from .model import Config
 def closure(config: Config, role: str) -> tuple[str, ...]:
     """Return the roles that *role* inherits policy from."""
     found: list[str] = []
-    _walk(config, role, found, 1)
-    return tuple(found)
-
-
-def _walk(config: Config, role: str, found: list[str], depth: int) -> None:
-    for parent in config.inherits.get(role, ()):
-        if parent not in config.roles:
-            continue
-        if depth == 1:
+    seen = {role}
+    queue: deque[str] = deque([role])
+    while queue:
+        current = queue.popleft()
+        for parent in config.inherits.get(current, ()):
+            if parent in seen or parent not in config.roles:
+                continue
+            seen.add(parent)
             found.append(parent)
-        _walk(config, parent, found, depth + 1)
+            queue.append(parent)
+    return tuple(found)
 
 
 def route(config: Config, start: str, target: str) -> tuple[str, ...]:

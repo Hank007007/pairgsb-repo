@@ -61,6 +61,7 @@ def parse(raw: Any) -> Config:
     inherits = _parse_named_lists(raw.get("inherits", {}), "inherits")
     bindings = _parse_named_lists(raw.get("bindings", {}), "bindings")
     principals = _parse_principals(raw.get("principals", []))
+    _check_references(roles, inherits, bindings)
 
     return Config(
         roles=roles,
@@ -68,6 +69,27 @@ def parse(raw: Any) -> Config:
         bindings=bindings,
         principals=principals,
     )
+
+
+def _check_references(
+    roles: dict[str, Role],
+    inherits: dict[str, tuple[str, ...]],
+    bindings: dict[str, tuple[str, ...]],
+) -> None:
+    for name, parents in inherits.items():
+        if name not in roles:
+            raise ConfigError(f'inherits["{name}"]: unknown role "{name}"')
+        for index, parent in enumerate(parents):
+            if parent not in roles:
+                raise ConfigError(
+                    f'inherits["{name}"][{index}]: unknown role "{parent}"'
+                )
+    for principal, role_names in bindings.items():
+        for index, role_name in enumerate(role_names):
+            if role_name not in roles:
+                raise ConfigError(
+                    f'bindings["{principal}"][{index}]: unknown role "{role_name}"'
+                )
 
 
 def _parse_roles(raw: Any) -> dict[str, Role]:
@@ -104,7 +126,14 @@ def _as_bool(value: Any, where: str) -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
-        return bool(value)
+        lowered = value.lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+        raise ConfigError(
+            f'{where}: expected a boolean or "true"/"false", got {value!r}'
+        )
     raise ConfigError(f"{where}: expected a boolean, got {type(value).__name__}")
 
 

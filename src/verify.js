@@ -1,7 +1,14 @@
-import { canonicalKey, canonicalQuery, parseQuery, stripProtocolParams } from './canonical.js';
+import {
+  canonicalKey,
+  canonicalQuery,
+  parseQuery,
+  parseQueryPairs,
+  stripProtocolPairs,
+  stripProtocolParams,
+} from './canonical.js';
 import { candidateVersions } from './keys.js';
 import {
-  CANONICAL_VERSION,
+  buildCanonicalString,
   PROTOCOL_ALG,
   PROTOCOL_EXPIRES,
   PROTOCOL_METHOD,
@@ -21,35 +28,62 @@ import { hmac, resolveKey, signaturesMatch } from './sign.js';
 export const CLOCK_SKEW_SECONDS = 30;
 export const DEFAULT_ALG = 'HS256';
 
-// Algorithms the gateway is willing to evaluate. Unknown names are mapped to
-// a digest as a courtesy to callers running older SDK builds.
-const ALGORITHMS = {
-  HS256: 'sha256',
-  HS384: 'sha384',
-  HS512: 'sha512',
-};
+const PROTOCOL_PARAMS = new Set([
+  PROTOCOL_ALG,
+  PROTOCOL_METHOD,
+  PROTOCOL_EXPIRES,
+  PROTOCOL_TENANT,
+  PROTOCOL_VERSION,
+  SIG_PARAM,
+]);
 
-function normalizeAlgorithm(name) {
-  if (!name) return DEFAULT_ALG;
-  const upper = String(name).toUpperCase();
-  if (ALGORITHMS[upper]) return upper;
-  return DEFAULT_ALG;
+const ABSOLUTE_URL_PATH = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*([^?#]*)/;
+
+function rawPathname(target, parsed) {
+  const match = ABSOLUTE_URL_PATH.exec(target);
+  if (!match) return parsed.pathname;
+  return match[1] || '/';
 }
 
-function splitTarget(target) {
-  const parsed = new URL(target);
-  const prefix = parsed.pathname.replace(/^\/+/, '');
-  const slash = prefix.indexOf('/');
-  if (slash <= 0) {
-    return { bucket: decodeURIComponent(prefix), key: '' };
+function decodeSegment(segment, allowSlash = false) {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    throw new TypeError('invalid percent-encoding in path');
   }
-  return {
-    bucket: decodeURIComponent(prefix.slice(0, slash)),
-    key: prefix.slice(slash + 1)
-      .split('/')
-      .map((segment) => decodeURIComponent(segment))
-      .join('/'),
-  };
+  if (
+    decoded === ''
+    || decoded === '.'
+    || decoded === '..'
+    || (!allowSlash && decoded.includes('/'))
+  ) {
+    throw new TypeError('invalid object key');
+  }
+  return decoded;
+}
+
+function splitTarget(pathname) {
+  const stripped = pathname.startsWith('/') ? pathname.slice(1) : pathname;
+  const slash = stripped.indexOf('/');
+  if (slash < 0) {
+    throw new TypeError('invalid object key');
+  }
+
+  const rawBucket = stripped.slice(0, slash);
+  const bucket = decodeSegment(rawBucket);
+  const keySegments = stripped.slice(slash + 1)
+    .split('/')
+    .map((segment) => decodeSegment(segment, true));
+  return { bucket, key: keySegments.join('/') };
+}
+
+function normalizeMethod(method) {
+  const value = String(method).toUpperCase();
+  if (!/^[A-Z]+$/.test(value)) {
+    throw new TypeError('invalid method');
+  }
+  return value;
 }
 
 /**
@@ -69,15 +103,24 @@ export function verify(target, { keyring, now = Math.floor(Date.now() / 1000) } 
 
   let url;
   try {
-    url = new URL(target);
+    url = new URL(target.trim());
   } catch {
     return { ok: false, reason: 'malformed-url' };
   }
 
-  const query = parseQuery(url.search);
+  const params = parseQueryPairs(url.search);
+  const query = parseQuery(params);
   const presented = query[SIG_PARAM];
   if (!presented) {
     return { ok: false, reason: 'missing-signature' };
+  }
+
+  const protocolCounts = new Map();
+  for (const [name] of params) {
+    if (!PROTOCOL_PARAMS.has(name)) continue;
+    const count = (protocolCounts.get(name) ?? 0) + 1;
+    if (count > 1) return { ok: false, reason: 'duplicate-parameter' };
+    protocolCounts.set(name, count);
   }
 
   const tenant = query[PROTOCOL_TENANT];
@@ -85,26 +128,72 @@ export function verify(target, { keyring, now = Math.floor(Date.now() / 1000) } 
     return { ok: false, reason: 'missing-tenant' };
   }
 
-  const method = (query[PROTOCOL_METHOD] ?? 'GET').toUpperCase();
-  const expires = Number(query[PROTOCOL_EXPIRES]);
-  const alg = normalizeAlgorithm(query[PROTOCOL_ALG]);
+  const rawAlg = query[PROTOCOL_ALG];
+  if (rawAlg === undefined) {
+    return { ok: false, reason: 'missing-alg' };
+  }
+  if (rawAlg !== DEFAULT_ALG) {
+    return { ok: false, reason: 'unsupported-alg' };
+  }
 
-  const { bucket, key } = splitTarget(target);
-  const callerQuery = stripProtocolParams(query);
+  const rawMethod = query[PROTOCOL_METHOD];
+  if (rawMethod === undefined) {
+    return { ok: false, reason: 'missing-method' };
+  }
+  let method;
+  try {
+    method = normalizeMethod(rawMethod);
+  } catch {
+    return { ok: false, reason: 'invalid-method' };
+  }
 
-  const canonical = [
-    CANONICAL_VERSION,
-    bucket,
-    canonicalKey(key),
-    canonicalQuery(callerQuery),
-    String(expires),
-    tenant,
-  ].join('\n');
+  const rawExpires = query[PROTOCOL_EXPIRES];
+  if (rawExpires === undefined) {
+    return { ok: false, reason: 'missing-expires' };
+  }
+  if (!/^(0|[1-9][0-9]*)$/.test(rawExpires)) {
+    return { ok: false, reason: 'invalid-expires' };
+  }
+  const expires = Number(rawExpires);
+  if (!Number.isSafeInteger(expires)) {
+    return { ok: false, reason: 'invalid-expires' };
+  }
+
+  if (query[PROTOCOL_VERSION] === undefined) {
+    return { ok: false, reason: 'missing-version' };
+  }
 
   const versions = resolveKey(keyring, tenant);
-  for (const version of candidateVersions(versions)) {
-    const expected = hmac(version.secret, canonical, alg);
+  if (versions.length === 0) {
+    return { ok: false, reason: 'unknown-tenant' };
+  }
+
+  let bucket;
+  let key;
+  try {
+    ({ bucket, key } = splitTarget(rawPathname(target.trim(), url)));
+    canonicalKey(key);
+  } catch {
+    return { ok: false, reason: 'invalid-key' };
+  }
+
+  const callerQuery = stripProtocolPairs(params);
+  const canonical = buildCanonicalString({
+    bucket,
+    key,
+    method,
+    query: callerQuery,
+    expires,
+    tenant,
+  });
+
+  const clock = Math.floor(Number(now));
+  for (const version of candidateVersions(versions, clock)) {
+    const expected = hmac(version.secret, canonical, rawAlg);
     if (signaturesMatch(expected, presented)) {
+      if (clock > expires + CLOCK_SKEW_SECONDS) {
+        return { ok: false, reason: 'expired' };
+      }
       return { ok: true, tenant, method, bucket, key, expires, version: version.version };
     }
   }
@@ -112,4 +201,4 @@ export function verify(target, { keyring, now = Math.floor(Date.now() / 1000) } 
   return { ok: false, reason: 'bad-signature' };
 }
 
-export { canonicalQuery, parseQuery, stripProtocolParams, PROTOCOL_VERSION };
+export { canonicalQuery, parseQuery, parseQueryPairs, stripProtocolParams, PROTOCOL_VERSION };

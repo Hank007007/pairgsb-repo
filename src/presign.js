@@ -1,4 +1,12 @@
-import { canonicalKey, canonicalQuery, encodePath, parseQuery, stripProtocolParams } from './canonical.js';
+import {
+  canonicalKey,
+  canonicalQuery,
+  encodePath,
+  parseQuery,
+  parseQueryPairs,
+  stripProtocolPairs,
+  stripProtocolParams,
+} from './canonical.js';
 import { activeVersion, candidateVersions } from './keys.js';
 import { DEFAULT_ALG, hmac, resolveKey } from './sign.js';
 
@@ -28,15 +36,17 @@ export const SIG_PARAM = 'sig';
  *
  * Lines, joined with "\n":
  *   urlseal-v1
+ *   <method>
  *   <bucket>
  *   <canonical key>
  *   <canonical query>
  *   <expires>
  *   <tenant>
  */
-export function buildCanonicalString({ bucket, key, query, expires, tenant }) {
+export function buildCanonicalString({ bucket, key, method = 'GET', query, expires, tenant }) {
   return [
     CANONICAL_VERSION,
+    normalizeMethod(method),
     bucket,
     canonicalKey(key),
     canonicalQuery(query ?? {}),
@@ -103,23 +113,31 @@ export function presign({
 
   const requestMethod = normalizeMethod(method);
   const ttl = normalizeExpiresIn(expiresIn);
-  const expires = Math.floor(now) + ttl;
+  const signingTime = Math.floor(now);
+  const expires = signingTime + ttl;
 
   const versions = resolveKey(keyring, tenant);
   const active = activeVersion(versions);
   if (!active) {
     throw new Error(`no signing key available for tenant "${tenant}"`);
   }
+  if (active.not_after != null && signingTime > active.not_after) {
+    throw new Error(`signing key for tenant "${tenant}" has expired`);
+  }
 
-  const canonical = buildCanonicalString({ bucket, key, query, expires, tenant });
+  const callerQuery = stripProtocolPairs(query ?? {});
+  const canonical = buildCanonicalString({
+    bucket,
+    key,
+    method: requestMethod,
+    query: callerQuery,
+    expires,
+    tenant,
+  });
   const sig = hmac(active.secret, canonical, alg);
 
-  const callerQuery = stripProtocolParams(
-    typeof query === 'string' ? parseQuery(query) : query ?? {},
-  );
-
   const target = new URL(encodePath(bucket, canonicalKey(key)), host);
-  for (const [name, value] of Object.entries(callerQuery)) {
+  for (const [name, value] of callerQuery) {
     target.searchParams.append(name, value);
   }
   target.searchParams.set(PROTOCOL_ALG, alg);
@@ -138,4 +156,4 @@ export function requestQuery(url) {
   return stripProtocolParams(parseQuery(new URL(url).search));
 }
 
-export { candidateVersions, canonicalQuery, stripProtocolParams };
+export { candidateVersions, canonicalQuery, parseQueryPairs, stripProtocolParams };

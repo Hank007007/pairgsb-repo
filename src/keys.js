@@ -62,12 +62,19 @@ export function parseKeyring(text, source = 'keys.json') {
     if (!Array.isArray(versions) || versions.length === 0) {
       throw new Error(`${source}: tenant "${tenant}" must list at least one version`);
     }
-    const byVersion = new Map();
+    const seen = new Set();
+    const normalized = [];
     for (let i = 0; i < versions.length; i += 1) {
       const entry = normalizeVersion(versions[i], `${source}: tenant "${tenant}" [${i}]`);
-      byVersion.set(entry.version, entry);
+      if (seen.has(entry.version)) {
+        throw new Error(
+          `${source}: tenant "${tenant}" contains duplicate version ${entry.version}`,
+        );
+      }
+      seen.add(entry.version);
+      normalized.push(entry);
     }
-    keyring[tenant] = Object.freeze([...byVersion.values()]);
+    keyring[tenant] = Object.freeze(normalized);
   }
   return keyring;
 }
@@ -88,8 +95,12 @@ export function activeVersion(versions) {
 }
 
 /**
- * Every version that should be tried while verifying a link.
+ * Every version that is acceptable at `now`, independent of file order.
  */
-export function candidateVersions(versions) {
-  return activeVersion(versions) ? [activeVersion(versions)] : [];
+export function candidateVersions(versions, now = Math.floor(Date.now() / 1000)) {
+  if (!Array.isArray(versions)) return [];
+  const clock = Number(now);
+  return versions
+    .filter((version) => version.not_after == null || clock <= version.not_after)
+    .sort((a, b) => b.version - a.version);
 }

@@ -31,7 +31,9 @@ export {
 
 export {
   parseQuery,
+  parseQueryPairs,
   stripProtocolParams,
+  stripProtocolPairs,
   canonicalQuery,
   canonicalKey,
   encodePath,

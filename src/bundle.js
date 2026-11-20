@@ -38,7 +38,7 @@ export function splitHostPort(value) {
     if (close === -1) {
       throw new BundleError(`malformed IPv6 host: ${value}`);
     }
-    const hostname = value.slice(0, close + 1).toLowerCase();
+    const hostname = normalizeHostname(value.slice(0, close + 1));
     const rest = value.slice(close + 1);
     if (rest === '') {
       return { hostname, port: null };
@@ -55,12 +55,23 @@ export function splitHostPort(value) {
   const last = value.lastIndexOf(':');
   if (first !== last) {
     // Multiple colons and no brackets: a bare IPv6 literal without a port.
-    return { hostname: `[${value.toLowerCase()}]`, port: null };
+    return { hostname: normalizeHostname(`[${value}]`), port: null };
   }
   return {
-    hostname: stripRootDot(value.slice(0, first).toLowerCase()),
+    hostname: normalizeHostname(value.slice(0, first)),
     port: validatePort(value.slice(first + 1), value),
   };
+}
+
+function normalizeHostname(hostname) {
+  if (hostname.startsWith('[')) {
+    try {
+      return new URL(`http://${hostname}/`).hostname.toLowerCase();
+    } catch {
+      return hostname.toLowerCase();
+    }
+  }
+  return stripRootDot(hostname.toLowerCase());
 }
 
 function stripRootDot(hostname) {

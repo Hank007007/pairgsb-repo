@@ -9,14 +9,15 @@
  * Behavior is specified in `docs/credential-routing.md`.
  */
 
-import { injectIntoRequest } from './inject.js';
+import { injectIntoRequest, effectiveHost, stripCredentialHeaders } from './inject.js';
 import { followRedirect, isRedirectStatus } from './redirect.js';
 import { createRetryQueue, isRetryableStatus } from './retry.js';
-import { createAuditLog, redactHeaders } from './audit.js';
+import { createAuditLog, redactHeaders, redactText, redactUrl } from './audit.js';
 import { nodeTransport } from './transport.js';
 import { createBundleStore, compileBundle } from './bundle.js';
 import {
   AbortedError,
+  InsecureRedirectError,
   OptionsError,
   TooManyRedirectsError,
   TransportError,
@@ -35,6 +36,8 @@ const EMPTY_BUNDLE = compileBundle({ secrets: [] }, 0, '<empty>');
  * @property {number} [maxRedirects]
  * @property {boolean} [allowInsecureRedirects]
  * @property {() => number} [random]
+ * @property {() => number | Date} [now]
+ * @property {() => number | Date} [clock]
  */
 
 /**
@@ -51,11 +54,38 @@ export function createRelay(options = {}) {
     maxRedirects = 5,
     allowInsecureRedirects = false,
     random = Math.random,
+    now: nowOption,
+    clock,
   } = options;
+  const now = nowOption ?? clock ?? (() => Date.now());
 
   const store = createBundleStore(bundle);
   const retryQueue = createRetryQueue({ baseDelayMs, maxDelayMs, random });
   const counters = { requests: 0, attempts: 0, retries: 0, redirects: 0 };
+
+  function secretValuesFor(state) {
+    const values = new Set(state.secrets);
+    for (const entry of store.current.entries) {
+      values.add(entry.value);
+    }
+    return [...values];
+  }
+
+  function writeAudit(state, record) {
+    audit.write(record, { secretValues: secretValuesFor(state) });
+  }
+
+  function injectAtSend(state) {
+    const injected = injectIntoRequest(store.current, state.url, state.callerHeaders, { now });
+    if (injected.entry !== null) {
+      state.secrets.add(injected.entry.value);
+    }
+    return injected;
+  }
+
+  function transportError(state, error) {
+    return new TransportError(redactText(error?.message ?? error, secretValuesFor(state)));
+  }
 
   /**
    * Send one attempt. `headers` are the exact headers that go on the wire.
@@ -71,7 +101,7 @@ export function createRelay(options = {}) {
       timeoutMs: state.timeoutMs,
       signal: state.signal,
     });
-    audit.write({
+    writeAudit(state, {
       type: 'attempt',
       method: state.method,
       url: state.url,
@@ -85,43 +115,43 @@ export function createRelay(options = {}) {
 
   /**
    * Retry entry point: wait out the backoff, then send the queued request and
-   * keep going while the outcome is retryable.
+   * keep going while the outcome is retryable. Credentials are deliberately
+   * re-derived at dispatch time so hot reloads take effect during backoff.
    */
-  function scheduleRetry(state, attempt, headers, entry) {
+  function scheduleRetry(state, attempt) {
     counters.retries += 1;
     return new Promise((resolve, reject) => {
       retryQueue.scheduleRetry({
         url: state.url,
         method: state.method,
         body: state.body,
-        headers,
-        entry,
         attempt: attempt + 1,
         dispatch: async (request) => {
+          const injected = injectAtSend(state);
           let response;
           try {
-            response = await send(state, request.headers, request.entry, request.attempt);
+            response = await send(state, injected.headers, injected.entry, request.attempt);
           } catch (error) {
             if (error instanceof AbortedError) {
-              audit.write({ type: 'aborted', method: state.method, url: state.url, attempt: request.attempt });
+              writeAudit(state, { type: 'aborted', method: state.method, url: state.url, attempt: request.attempt });
               reject(error);
               return;
             }
-            const wrapped = error instanceof TransportError ? error : new TransportError(error.message, error);
+            const wrapped = transportError(state, error);
             if (request.attempt < maxAttempts) {
-              resolve(scheduleRetry(state, request.attempt, request.headers, request.entry));
+              resolve(scheduleRetry(state, request.attempt));
             } else {
-              audit.write({ type: 'transport-failed', method: state.method, url: state.url, attempt: request.attempt });
+              writeAudit(state, { type: 'transport-failed', method: state.method, url: state.url, attempt: request.attempt });
               reject(wrapped);
             }
             return;
           }
 
           if (isRetryableStatus(response.status) && request.attempt < maxAttempts) {
-            resolve(scheduleRetry(state, request.attempt, request.headers, request.entry));
+            resolve(scheduleRetry(state, request.attempt));
             return;
           }
-          resolve({ response, headers: request.headers, entry: request.entry });
+          resolve({ response, headers: injected.headers, entry: injected.entry });
         },
         onError: reject,
         onCancel: () => reject(new AbortedError('retry cancelled')),
@@ -135,29 +165,29 @@ export function createRelay(options = {}) {
    */
   async function runHop(state) {
     const attempt = 1;
-    const injected = injectIntoRequest(store.current, state.url, state.callerHeaders);
+    const injected = injectAtSend(state);
 
     let response;
     try {
       response = await send(state, injected.headers, injected.entry, attempt);
     } catch (error) {
       if (error instanceof AbortedError) {
-        audit.write({ type: 'aborted', method: state.method, url: state.url, attempt });
+        writeAudit(state, { type: 'aborted', method: state.method, url: state.url, attempt });
         throw error;
       }
-      const wrapped = error instanceof TransportError ? error : new TransportError(error.message, error);
+      const wrapped = transportError(state, error);
       if (attempt >= maxAttempts) {
-        audit.write({ type: 'transport-failed', method: state.method, url: state.url, attempt });
+        writeAudit(state, { type: 'transport-failed', method: state.method, url: state.url, attempt });
         throw wrapped;
       }
-      return scheduleRetry(state, attempt, injected.headers, injected.entry);
+      return scheduleRetry(state, attempt);
     }
 
     if (!isRetryableStatus(response.status) || attempt >= maxAttempts) {
       return { response, headers: injected.headers, entry: injected.entry };
     }
 
-    return scheduleRetry(state, attempt, injected.headers, injected.entry);
+    return scheduleRetry(state, attempt);
   }
 
   /**
@@ -181,26 +211,39 @@ export function createRelay(options = {}) {
       }
 
       if (redirects >= maxRedirects) {
-        audit.write({ type: 'redirect-limit', method: current.method, url: current.url, attempt: 1 });
-        throw new TooManyRedirectsError(current.url, maxRedirects);
+        writeAudit(current, { type: 'redirect-limit', method: current.method, url: current.url, attempt: 1 });
+        throw new TooManyRedirectsError(redactUrl(current.url, secretValuesFor(current)), maxRedirects);
       }
 
-      const next = followRedirect(
-        { url: current.url, method: current.method, body: current.body, headers: result.headers },
-        result.response.status,
-        location,
-        { allowInsecureRedirects },
-      );
+      let next;
+      try {
+        next = followRedirect(
+          { url: current.url, method: current.method, body: current.body, headers: current.callerHeaders },
+          result.response.status,
+          location,
+          { allowInsecureRedirects },
+        );
+      } catch (error) {
+        if (error instanceof InsecureRedirectError) {
+          const secrets = secretValuesFor(current);
+          throw new InsecureRedirectError(redactUrl(error.from, secrets), redactUrl(error.to, secrets));
+        }
+        throw error;
+      }
+
+      if (effectiveHost(new URL(current.url)) !== effectiveHost(new URL(next.url))) {
+        next.headers = stripCredentialHeaders(next.headers);
+      }
 
       if (seen.has(next.url)) {
-        audit.write({ type: 'redirect-loop', method: current.method, url: next.url });
-        throw new TooManyRedirectsError(next.url, maxRedirects);
+        writeAudit(current, { type: 'redirect-loop', method: current.method, url: next.url });
+        throw new TooManyRedirectsError(redactUrl(next.url, secretValuesFor(current)), maxRedirects);
       }
       seen.add(next.url);
       redirects += 1;
       counters.redirects += 1;
 
-      audit.write({
+      writeAudit(current, {
         type: 'redirect',
         method: next.method,
         url: next.url,
@@ -240,6 +283,7 @@ export function createRelay(options = {}) {
       timeoutMs: opts.timeoutMs,
       signal: opts.signal,
       stats: { attempts: 0 },
+      secrets: new Set(),
     };
     counters.requests += 1;
 
@@ -252,7 +296,7 @@ export function createRelay(options = {}) {
       url: result.url,
       attempts: state.stats.attempts,
       redirects: result.redirects,
-      redactedHeaders: redactHeaders(result.headers),
+      redactedHeaders: redactHeaders(result.headers, secretValuesFor(state)),
     };
   }
 

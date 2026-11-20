@@ -5,6 +5,9 @@ const { RuleError } = require('./errors');
 const KEYWORDS = new Set(['and', 'or', 'not', 'in', 'matches', 'true', 'false', 'null']);
 const COMPARISON_OPERATORS = new Set(['==', '!=', '<', '<=', '>', '>=']);
 
+const MAX_DEPTH = 64;
+const MAX_NODES = 2048;
+
 function isKeyword(value) {
   return KEYWORDS.has(value);
 }
@@ -13,6 +16,34 @@ class Parser {
   constructor(tokens) {
     this.tokens = tokens;
     this.index = 0;
+    this.depth = 0;
+    this.nodeCount = 0;
+  }
+
+  enter() {
+    this.depth += 1;
+    if (this.depth > MAX_DEPTH) {
+      throw new RuleError(
+        'E_PARSE_TOO_DEEP',
+        `Nesting deeper than ${MAX_DEPTH} levels is not allowed`,
+        this.peek().start,
+      );
+    }
+  }
+
+  leave() {
+    this.depth -= 1;
+  }
+
+  countNode(start) {
+    this.nodeCount += 1;
+    if (this.nodeCount > MAX_NODES) {
+      throw new RuleError(
+        'E_PARSE_TOO_LARGE',
+        `Rule has more than ${MAX_NODES} nodes`,
+        start,
+      );
+    }
   }
 
   peek(offset = 0) {
@@ -76,6 +107,7 @@ class Parser {
     while (this.atKeyword('or')) {
       this.next();
       const right = this.parseAnd();
+      this.countNode(left.start);
       left = { type: 'logical', op: 'or', left, right, start: left.start };
     }
     return left;
@@ -86,6 +118,7 @@ class Parser {
     while (this.atKeyword('and')) {
       this.next();
       const right = this.parseNot();
+      this.countNode(left.start);
       left = { type: 'logical', op: 'and', left, right, start: left.start };
     }
     return left;
@@ -94,7 +127,10 @@ class Parser {
   parseNot() {
     if (this.atKeyword('not')) {
       const token = this.next();
+      this.enter();
       const operand = this.parseNot();
+      this.leave();
+      this.countNode(token.start);
       return { type: 'unary', op: 'not', operand, start: token.start };
     }
     return this.parseComparison();
@@ -107,18 +143,21 @@ class Parser {
     if (token.type === 'op' && COMPARISON_OPERATORS.has(token.value)) {
       this.next();
       const right = this.parsePostfix();
+      this.countNode(left.start);
       return { type: 'binary', op: token.value, left, right, start: left.start };
     }
 
     if (token.type === 'ident' && token.value === 'in') {
       this.next();
       const right = this.parsePostfix();
+      this.countNode(left.start);
       return { type: 'in', left, right, start: left.start };
     }
 
     if (token.type === 'ident' && token.value === 'matches') {
       this.next();
       const right = this.parsePostfix();
+      this.countNode(left.start);
       return { type: 'matches', left, right, start: left.start };
     }
 
@@ -147,7 +186,7 @@ class Parser {
           );
         }
         this.next();
-        expression = appendProperty(expression, segment.value);
+        expression = this.appendProperty(expression, segment.value);
         continue;
       }
 
@@ -165,21 +204,25 @@ class Parser {
 
     if (token.type === 'number') {
       this.next();
+      this.countNode(token.start);
       return { type: 'literal', value: token.value, raw: token.raw, start: token.start };
     }
 
     if (token.type === 'string') {
       this.next();
+      this.countNode(token.start);
       return { type: 'literal', value: token.value, start: token.start };
     }
 
     if (token.type === 'ident') {
       if (token.value === 'true' || token.value === 'false') {
         this.next();
+        this.countNode(token.start);
         return { type: 'literal', value: token.value === 'true', start: token.start };
       }
       if (token.value === 'null') {
         this.next();
+        this.countNode(token.start);
         return { type: 'literal', value: null, start: token.start };
       }
       if (isKeyword(token.value)) {
@@ -190,13 +233,16 @@ class Parser {
         );
       }
       this.next();
+      this.countNode(token.start);
       return { type: 'ident', name: token.value, start: token.start };
     }
 
     if (token.type === 'op' && token.value === '(') {
       this.next();
+      this.enter();
       const expression = this.parseOr();
       this.expectOperator(')');
+      this.leave();
       return expression;
     }
 
@@ -217,6 +263,7 @@ class Parser {
 
   parseCall(callee) {
     this.expectOperator('(');
+    this.enter();
     const args = [];
     if (!this.atOperator(')')) {
       args.push(this.parseOr());
@@ -226,11 +273,14 @@ class Parser {
       }
     }
     this.expectOperator(')');
+    this.leave();
+    this.countNode(callee.start);
     return { type: 'call', callee, args, start: callee.start };
   }
 
   parseArray() {
     const open = this.expectOperator('[');
+    this.enter();
     const elements = [];
     if (!this.atOperator(']')) {
       elements.push(this.parseOr());
@@ -240,22 +290,25 @@ class Parser {
       }
     }
     this.expectOperator(']');
+    this.leave();
+    this.countNode(open.start);
     return { type: 'array', elements, start: open.start };
   }
-}
 
-function appendProperty(expression, property) {
-  if (expression.type === 'ident') {
-    return { type: 'field', segments: [expression.name, property], start: expression.start };
+  appendProperty(expression, property) {
+    this.countNode(expression.start);
+    if (expression.type === 'ident') {
+      return { type: 'field', segments: [expression.name, property], start: expression.start };
+    }
+    if (expression.type === 'field') {
+      return {
+        type: 'field',
+        segments: [...expression.segments, property],
+        start: expression.start,
+      };
+    }
+    return { type: 'member', object: expression, property, start: expression.start };
   }
-  if (expression.type === 'field') {
-    return {
-      type: 'field',
-      segments: [...expression.segments, property],
-      start: expression.start,
-    };
-  }
-  return { type: 'member', object: expression, property, start: expression.start };
 }
 
 function describeToken(token) {

@@ -12,10 +12,7 @@ function isDigit(ch) {
 function isIdentStart(ch) {
   return (ch >= 'a' && ch <= 'z')
     || (ch >= 'A' && ch <= 'Z')
-    || ch === '_'
-    || ch === '$'
-    || ch === '#'
-    || ch.charCodeAt(0) > 0x7f;
+    || ch === '_';
 }
 
 function isIdentPart(ch) {
@@ -45,18 +42,53 @@ function readIdent(source, start) {
   };
 }
 
+const ESCAPES = {
+  '"': '"',
+  "'": "'",
+  '\\': '\\',
+  n: '\n',
+  t: '\t',
+  r: '\r',
+  '/': '/',
+};
+
 function readString(source, start) {
+  const quote = source[start];
   let i = start + 1;
   let value = '';
-  while (i < source.length && source[i] !== '"') {
-    value += source[i];
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === quote) {
+      return {
+        token: { type: 'string', value, start, end: i + 1 },
+        next: i + 1,
+      };
+    }
+    if (ch === '\n') {
+      throw new RuleError(
+        'E_LEX_UNTERMINATED_STRING',
+        'String literal may not contain an unescaped newline',
+        i,
+      );
+    }
+    if (ch === '\\') {
+      const escaped = source[i + 1];
+      const mapped = ESCAPES[escaped];
+      if (mapped === undefined) {
+        throw new RuleError(
+          'E_LEX_BAD_ESCAPE',
+          `Unrecognised escape sequence ${JSON.stringify(`\\${escaped ?? ''}`)}`,
+          i,
+        );
+      }
+      value += mapped;
+      i += 2;
+      continue;
+    }
+    value += ch;
     i += 1;
   }
-  if (i < source.length) i += 1;
-  return {
-    token: { type: 'string', value, start, end: i },
-    next: i,
-  };
+  throw new RuleError('E_LEX_UNTERMINATED_STRING', 'String literal is not closed', start);
 }
 
 function tokenize(source) {
@@ -75,7 +107,7 @@ function tokenize(source) {
       continue;
     }
 
-    if (ch === '"') {
+    if (ch === '"' || ch === "'") {
       const result = readString(source, i);
       tokens.push(result.token);
       i = result.next;

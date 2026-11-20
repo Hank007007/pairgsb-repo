@@ -55,6 +55,12 @@ for (const [tenantId, definition] of Object.entries(SCHEMAS)) {
   BUILT.set(tenantId, buildSchema(tenantId, definition));
 }
 
+const FORBIDDEN_SEGMENTS = new Set(['constructor', '__proto__', 'prototype']);
+
+function isForbiddenSegment(segment) {
+  return FORBIDDEN_SEGMENTS.has(segment);
+}
+
 function getFieldSchema(tenantId) {
   const schema = BUILT.get(tenantId);
   if (!schema) {
@@ -71,19 +77,23 @@ function getFieldSchema(tenantId) {
 function readField(event, segments, schema) {
   const root = segments[0];
 
-  if (!schema.roots.has(root)) {
+  if (!schema || !schema.roots || !schema.roots.has(root)) {
     return { found: false, value: undefined };
   }
 
-  let current = event[root];
-  for (let i = 1; i < segments.length; i += 1) {
-    if (current === null || current === undefined) {
+  let current = event;
+  for (const segment of segments) {
+    if (current === null || typeof current !== 'object') {
       return { found: false, value: undefined };
     }
-    current = current[segments[i]];
+    if (isForbiddenSegment(segment)
+        || !Object.prototype.hasOwnProperty.call(current, segment)) {
+      return { found: false, value: undefined };
+    }
+    current = current[segment];
   }
 
-  if (current === undefined) {
+  if (current === undefined || typeof current === 'function') {
     return { found: false, value: undefined };
   }
   return { found: true, value: current };
@@ -92,4 +102,5 @@ function readField(event, segments, schema) {
 module.exports = {
   getFieldSchema,
   readField,
+  isForbiddenSegment,
 };

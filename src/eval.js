@@ -1,8 +1,19 @@
 'use strict';
 
-const { readField } = require('./fields');
-const { hasFunction, FUNCTIONS, callFunction, isCidr } = require('./fns');
+const { readField, isForbiddenSegment } = require('./fields');
+const { hasFunction, callFunction, isCidr } = require('./fns');
 const { compileMatches } = require('./regex');
+
+const MAX_STEPS = 10000;
+
+class BudgetExceeded extends Error {}
+
+function charge(context, amount = 1) {
+  const budget = context.budget;
+  if (!budget) return;
+  budget.remaining -= amount;
+  if (budget.remaining < 0) throw new BudgetExceeded('evaluation step budget exhausted');
+}
 
 function truthy(value) {
   if (value === null || value === undefined || value === false) return false;
@@ -11,29 +22,44 @@ function truthy(value) {
   return true;
 }
 
+function strictEqual(left, right) {
+  const a = left === undefined ? null : left;
+  const b = right === undefined ? null : right;
+  if (a === null || b === null) return a === b;
+  if (typeof a !== typeof b) return false;
+  // Numbers, strings and booleans compare by value; arrays and CIDR blocks
+  // compare by identity only.
+  return a === b;
+}
+
 function evalNode(node, context) {
+  if (context.budget === undefined || context.budget === null) {
+    context.budget = { remaining: MAX_STEPS };
+  }
+  charge(context);
+
   switch (node.type) {
     case 'literal':
       return node.value;
 
-    case 'array':
-      return node.elements.map((element) => evalNode(element, context));
-
-    case 'ident': {
-      if (hasFunction(node.name)) return FUNCTIONS[node.name];
-      const result = readField(context.event, [node.name], context.schema);
-      return result.found ? result.value : null;
+    case 'array': {
+      const values = [];
+      for (const element of node.elements) {
+        charge(context);
+        values.push(evalNode(element, context));
+      }
+      return values;
     }
 
-    case 'field': {
-      const result = readField(context.event, node.segments, context.schema);
-      return result.found ? result.value : null;
-    }
+    case 'ident':
+      return readFieldValue(context, [node.name]);
+
+    case 'field':
+      return readFieldValue(context, node.segments);
 
     case 'member': {
       const object = evalNode(node.object, context);
-      if (object === null || object === undefined) return null;
-      return object[node.property];
+      return readMember(object, node.property);
     }
 
     case 'unary':
@@ -41,10 +67,12 @@ function evalNode(node, context) {
 
     case 'logical': {
       const leftValue = evalNode(node.left, context);
-      const rightValue = evalNode(node.right, context);
-      return node.op === 'and'
-        ? (leftValue && rightValue)
-        : (leftValue || rightValue);
+      if (node.op === 'and') {
+        if (!truthy(leftValue)) return false;
+        return truthy(evalNode(node.right, context));
+      }
+      if (truthy(leftValue)) return true;
+      return truthy(evalNode(node.right, context));
     }
 
     case 'binary':
@@ -53,20 +81,24 @@ function evalNode(node, context) {
     case 'in': {
       const leftValue = evalNode(node.left, context);
       const rightValue = evalNode(node.right, context);
-      return evalIn(leftValue, rightValue);
+      return evalIn(leftValue, rightValue, context);
     }
 
     case 'matches': {
       const subject = evalNode(node.left, context);
       const pattern = evalNode(node.right, context);
-      return evalMatches(node, subject, pattern, context);
+      return evalMatches(node, subject, pattern);
     }
 
     case 'call': {
-      const target = evalNode(node.callee, context);
-      const args = node.args.map((argument) => evalNode(argument, context));
-      if (typeof target !== 'function') return null;
-      return target(...args);
+      const callee = node.callee;
+      if (!callee || callee.type !== 'ident' || !hasFunction(callee.name)) return null;
+      const args = [];
+      for (const argument of node.args) {
+        charge(context);
+        args.push(evalNode(argument, context));
+      }
+      return callFunction(callee.name, args);
     }
 
     default:
@@ -74,12 +106,27 @@ function evalNode(node, context) {
   }
 }
 
+function readFieldValue(context, segments) {
+  const result = readField(context.event, segments, context.schema);
+  return result.found ? result.value : null;
+}
+
+function readMember(object, property) {
+  if (object === null || typeof object !== 'object') return null;
+  if (isForbiddenSegment(property)) return null;
+  const prototype = Object.getPrototypeOf(object);
+  if (prototype !== Object.prototype && prototype !== null) return null;
+  if (!Object.prototype.hasOwnProperty.call(object, property)) return null;
+  const value = object[property];
+  return typeof value === 'function' ? null : value;
+}
+
 function evalComparison(op, left, right) {
   switch (op) {
     case '==':
-      return left == right; // eslint-disable-line eqeqeq
+      return strictEqual(left, right);
     case '!=':
-      return left != right; // eslint-disable-line eqeqeq
+      return !strictEqual(left, right);
     case '<':
       return compareOrdered(left, right) < 0;
     case '<=':
@@ -102,17 +149,17 @@ function compareOrdered(left, right) {
   return 0;
 }
 
-function evalIn(leftValue, rightValue) {
+function evalIn(leftValue, rightValue, context) {
   if (Array.isArray(rightValue)) {
-    return rightValue.some((candidate) => candidate === leftValue);
+    for (const candidate of rightValue) {
+      charge(context);
+      if (strictEqual(candidate, leftValue)) return true;
+    }
+    return false;
   }
 
   if (isCidr(rightValue)) {
     return cidrContains(rightValue, leftValue);
-  }
-
-  if (typeof rightValue === 'string') {
-    return rightValue.includes(String(leftValue));
   }
 
   return false;
@@ -132,10 +179,11 @@ function cidrContains(block, value) {
   return ((address & block.mask) >>> 0) === block.base;
 }
 
-function evalMatches(node, subject, patternValue, context) {
-  if (typeof subject !== 'string') return false;
+function evalMatches(node, subject, patternValue) {
+  if (typeof subject !== 'string' || typeof patternValue !== 'string') return false;
 
   const regexp = node.regexp || compileMatches(patternValue);
+  if (!regexp) return false;
   return regexp.test(subject);
 }
 
@@ -149,12 +197,12 @@ function evaluate(compiled, event, options = {}) {
     event: event || {},
     schema: compiled.schema,
     options,
+    budget: { remaining: MAX_STEPS },
   };
 
   try {
     return truthy(evalNode(compiled.ast, context));
   } catch (error) {
-    if (error instanceof RangeError) throw error;
     return false;
   }
 }
@@ -164,4 +212,5 @@ module.exports = {
   evalNode,
   truthy,
   callFunction,
+  MAX_STEPS,
 };

@@ -1,0 +1,13 @@
+users:
+  alice:
+    - platform
+  bob:
+    - db-oncall
+  carol: []
+groups:
+  platform:
+    - sre
+  sre:
+    - db-oncall
+  db-oncall: []
+  auditors: []

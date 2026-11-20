@@ -1,0 +1,24 @@
+# Build output
+/bin/
+/dist/
+/out/
+*.exe
+*.test
+*.out
+
+# Go tooling and caches
+/.cache/
+/.gocache/
+coverage.txt
+coverage.html
+profile.cov
+
+# Local editor and OS files
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local scratch input kept out of the repository
+.build.prompt.txt

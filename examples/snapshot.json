@@ -1,0 +1,59 @@
+{
+  "version": "2026-11-20T10:00:00Z",
+  "roles": [
+    {
+      "name": "pod-reader",
+      "rules": [
+        {
+          "verbs": ["get", "list", "watch"],
+          "apiGroups": [""],
+          "resources": ["pods"]
+        }
+      ]
+    },
+    {
+      "name": "db-operator",
+      "rules": [
+        {
+          "verbs": ["get", "list", "watch", "update"],
+          "apiGroups": [""],
+          "resources": ["pods"],
+          "resourceNames": ["db-prod"]
+        }
+      ]
+    }
+  ],
+  "clusterRoles": [
+    {
+      "name": "authenticated-baseline",
+      "rules": [
+        {
+          "verbs": ["get", "list"],
+          "apiGroups": [""],
+          "resources": ["namespaces", "configmaps"]
+        }
+      ]
+    }
+  ],
+  "roleBindings": [
+    {
+      "name": "sre-pod-readers",
+      "namespace": "platform",
+      "roleRef": {"kind": "Role", "name": "pod-reader"},
+      "subjects": [{"kind": "Group", "name": "sre"}]
+    },
+    {
+      "name": "db-operator-binding",
+      "namespace": "data",
+      "roleRef": {"kind": "Role", "name": "db-operator"},
+      "subjects": [{"kind": "User", "name": "bob"}]
+    }
+  ],
+  "clusterBindings": [
+    {
+      "name": "baseline-for-authenticated",
+      "roleRef": {"kind": "ClusterRole", "name": "authenticated-baseline"},
+      "subjects": [{"kind": "Group", "name": "system:authenticated"}]
+    }
+  ]
+}

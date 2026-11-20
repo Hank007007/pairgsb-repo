@@ -1,0 +1,33 @@
+{
+  "roles": {
+    "reader": {
+      "rules": [
+        {"actions": ["read"], "resources": ["archive/*"]}
+      ]
+    },
+    "writer": {
+      "rules": [
+        {"actions": ["write"], "resources": ["docs/*"]}
+      ]
+    },
+    "ops": {
+      "rules": [
+        {"actions": ["admin"], "resources": ["*"]}
+      ]
+    },
+    "analyst": {
+      "rules": [
+        {"actions": ["read"], "resources": ["audit/b"]}
+      ]
+    }
+  },
+  "inherits": {
+    "writer": ["reader"],
+    "ops": ["writer"]
+  },
+  "bindings": {
+    "alice": ["ops", "analyst"],
+    "bob": ["reader"]
+  },
+  "principals": ["alice", "bob"]
+}

@@ -1,0 +1,37 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# Test and tool caches
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editors and OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local scratch
+.build.prompt.txt

@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Test and coverage output
+coverage/
+.nyc_output/
+test-results/
+*.tap
+
+# Runtime artifacts
+*.log
+*.tmp
+tmp/
+.tmp/
+.cache/
+tokelatch-data/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local build input
+.build.prompt.txt

@@ -1,0 +1,31 @@
+# build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# go build/test cache
+.cache/
+coverage.txt
+coverage.html
+
+# editor/OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# scratch
+.scantmp/
+.one/
+.scan.out
+.build.prompt.txt
+
+
+# local scratch
+.scantmp/
+.one/
+.scan.out
+.build.prompt.txt
+

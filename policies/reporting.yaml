@@ -1,0 +1,35 @@
+version: 1
+
+# Reporting schema.  The default section deliberately allows reads of
+# undeclared reference tables while writes stay closed.
+
+tables:
+  fact_sales:
+    select:
+      - name: regional-analysts
+        roles: [analyst, analyst-admin]
+        when: region = subject.region or subject.role = 'analyst-admin'
+    update:
+      - name: nobody
+        roles: [analyst-admin]
+        when: false
+
+  dim_product:
+    select:
+      - name: published
+        roles: [analyst, analyst-admin, clerk]
+        when: published = true
+      - name: owners
+        roles: [analyst-admin]
+        when: owner_id = subject.user_id
+
+  dim_region:
+    select:
+      - name: reference
+        roles: [analyst, analyst-admin, clerk, manager]
+        when: true
+
+default:
+  select: allow
+  update: deny
+  delete: deny

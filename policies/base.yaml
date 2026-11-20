@@ -1,0 +1,74 @@
+version: 1
+
+# Example policy document for the warehouse schema.
+
+tables:
+  orders:
+    select:
+      - name: regional-clerk
+        roles: [clerk, manager]
+        when: region = subject.region and status != 'void'
+      - name: own-orders
+        roles: [clerk]
+        when: owner_id = subject.user_id
+      - name: finance-all
+        roles: [finance]
+        when: true
+    update:
+      - name: own-draft
+        roles: [clerk]
+        when: owner_id = subject.user_id and status = 'draft'
+      - name: finance-update
+        roles: [finance]
+        when: true
+    delete:
+      - name: managers
+        roles: [manager]
+        when: region = subject.region
+
+  customers:
+    select:
+      - name: assigned
+        roles: [clerk]
+        when: account_manager = subject.user_id
+      - name: managers-region
+        roles: [manager]
+        when: region = subject.region
+      - name: admins
+        roles: [admin]
+        when: true
+    update:
+      - name: assigned
+        roles: [clerk]
+        when: account_manager = subject.user_id
+
+  audit_log:
+    select:
+      - name: auditors
+        roles: [auditor]
+        when: subject.clearance in ('internal', 'restricted')
+      - name: owners
+        roles: [clerk]
+        when: actor_id = subject.user_id
+
+  invoices:
+    select:
+      - name: finance
+        roles: [finance]
+        when: not status = 'draft'
+      - name: clerk-visible
+        roles: [clerk]
+        when: region = subject.region and status = 'sent'
+    update:
+      - name: finance
+        roles: [finance]
+        when: status != 'paid'
+    delete:
+      - name: finance
+        roles: [finance]
+        when: status = 'draft'
+
+default:
+  select: deny
+  update: deny
+  delete: deny

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scopevault-tokencache"
+version = "0.1.0"
+description = "OAuth2 client-credentials token cache for internal service calls"
+requires-python = ">=3.9"
+dependencies = []
+
+[tool.setuptools]
+packages = ["scopevault"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"

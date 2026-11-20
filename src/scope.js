@@ -8,7 +8,14 @@
 /** Read the scope list out of a token payload. */
 export function readScopes(claims) {
   if (!claims || typeof claims !== 'object') return [];
-  const raw = claims.scope !== undefined ? claims.scope : claims.scopes;
+  let singular;
+  let plural;
+  for (const key of Object.keys(claims)) {
+    const lower = key.toLowerCase();
+    if (lower === 'scope' && singular === undefined) singular = claims[key];
+    else if (lower === 'scopes' && plural === undefined) plural = claims[key];
+  }
+  const raw = singular !== undefined ? singular : plural;
   if (raw === undefined || raw === null) return [];
   if (Array.isArray(raw)) {
     return raw.filter((item) => typeof item === 'string' && item !== '');
@@ -21,7 +28,15 @@ export function readScopes(claims) {
 
 /** True when the granted scope covers the required scope. */
 export function hasScope(granted, required) {
-  return String(granted).startsWith(String(required));
+  const have = String(granted);
+  const need = String(required);
+  if (have === need) return true;
+  if (have === '*') return true;
+  if (have.endsWith(':*')) {
+    const namespace = have.slice(0, -1);
+    return need.startsWith(namespace) && need.length > namespace.length;
+  }
+  return false;
 }
 
 /** True when every required scope is covered by the granted list. */

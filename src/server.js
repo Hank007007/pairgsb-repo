@@ -81,14 +81,11 @@ export function createHandler(config, deps = {}) {
     const requestId = randomUUID();
     res.setHeader('x-request-id', requestId);
 
-    const method = (req.method || 'GET').toUpperCase();
-    if (method === 'HEAD' || method === 'OPTIONS') {
-      res.writeHead(200, { allow: 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS' });
-      res.end();
+    const match = matchRoute(config.routes, req);
+    if (match.status === 'bad-path') {
+      reject(res, 400, 'bad-path');
       return;
     }
-
-    const match = matchRoute(config.routes, req);
     if (match.status === 'no-route') {
       reject(res, 404, 'no-route');
       return;
@@ -117,10 +114,13 @@ export function createHandler(config, deps = {}) {
     }
 
     try {
+      const queryAt = (req.url || '').indexOf('?');
+      const query = queryAt === -1 ? '' : req.url.slice(queryAt);
       forward({
         req,
         res,
         upstream: route.upstream,
+        url: `${match.path}${query}`,
         identity: auth.identity,
         timeoutMs: config.server.requestTimeoutMs,
         extraHeaders: { 'x-request-id': requestId },

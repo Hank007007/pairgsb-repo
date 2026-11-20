@@ -49,9 +49,23 @@ export async function introspectRemote(token, options = {}) {
 
 export function createIntrospector(options = {}) {
   const cache = new Map();
+  const now = options.now ?? (() => Date.now());
+  const ttlMs = Number.isInteger(options.cacheTtlMs) ? options.cacheTtlMs : 30000;
 
-  async function query(token) {
-    return introspectRemote(token, options);
+  function keyFor(token) {
+    return `${options.endpoint ?? ''} ${token}`;
+  }
+
+  /**
+   * A record lives for the smaller of cache_ttl_ms and the token's own
+   * exp, per docs/route-auth.md section 5.1.
+   */
+  function expiryFor(payload) {
+    let expiresAt = now() + ttlMs;
+    if (payload && typeof payload.exp === 'number') {
+      expiresAt = Math.min(expiresAt, payload.exp * 1000);
+    }
+    return expiresAt;
   }
 
   /**
@@ -60,35 +74,25 @@ export function createIntrospector(options = {}) {
    * @returns {Promise<{ok: true, payload: object} | {ok: false, reason: string}>}
    */
   async function lookup(token) {
-    const cached = cache.get(token);
+    const key = keyFor(token);
+    const cached = cache.get(key);
     if (cached !== undefined) {
-      return cached;
+      if (cached.expiresAt > now()) return cached.result;
+      cache.delete(key);
     }
-    const first = await query(token);
-    if (!first.ok) {
-      const record = { ok: false, reason: first.reason };
-      cache.set(token, record);
-      return record;
-    }
-    if (first.payload.active === false) {
-      const second = await query(token);
-      if (!second.ok) {
-        const record = { ok: false, reason: second.reason };
-        cache.set(token, record);
-        return record;
-      }
-      const record = { ok: true, payload: second.payload };
-      cache.set(token, record);
-      return record;
-    }
-    const record = { ok: true, payload: first.payload };
-    cache.set(token, record);
-    return record;
+    const result = await introspectRemote(token, options);
+    // Failures (transport error, timeout, non-2xx, malformed body) are
+    // never cached: the next request with this token introspects again.
+    if (!result.ok) return result;
+    // Both active and inactive decisions are definitive for this request
+    // and are retained for the same bounded window.
+    cache.set(key, { result, expiresAt: expiryFor(result.payload) });
+    return result;
   }
 
   function clear(token) {
     if (token === undefined) cache.clear();
-    else cache.delete(token);
+    else cache.delete(keyFor(token));
   }
 
   function size() {

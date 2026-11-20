@@ -11,6 +11,22 @@ import { URL } from 'node:url';
  */
 
 /**
+ * Headers the caller must never be able to inject into an upstream:
+ * legacy identity headers (replaced by gateway-owned ones where the route
+ * authenticates) and credentials. See docs/route-auth.md section 6.
+ */
+const STRIPPED_HEADERS = new Set([
+  'x-forwarded-user',
+  'x-auth-user',
+  'x-auth-scopes',
+  'x-auth-token-id',
+  'x-authenticated-user',
+  'x-remote-user',
+  'authorization',
+  'cookie',
+]);
+
+/**
  * Build the outbound header set.
  *
  * @param {object} inbound  raw inbound headers (node's `req.headers`)
@@ -18,14 +34,17 @@ import { URL } from 'node:url';
  * @param {object} extra    additional headers the gateway owns (e.g. x-request-id)
  */
 export function buildHeaders(inbound, identity, extra = {}) {
-  const headers = { ...inbound };
+  const headers = {};
+  for (const [name, value] of Object.entries(inbound || {})) {
+    if (!STRIPPED_HEADERS.has(name.toLowerCase())) headers[name] = value;
+  }
 
   if (identity && identity.user) {
-    headers['x-auth-user'] ||= identity.user;
-    headers['x-auth-scopes'] ||= identity.scopes || '';
+    headers['x-auth-user'] = identity.user;
+    headers['x-auth-scopes'] = identity.scopes || '';
   }
   if (identity && identity.tokenId) {
-    headers['x-auth-token-id'] ||= identity.tokenId;
+    headers['x-auth-token-id'] = identity.tokenId;
   }
   for (const [name, value] of Object.entries(extra)) {
     headers[name] = value;
@@ -51,11 +70,12 @@ function transportFor(target) {
  * @param {http.ServerResponse} ctx.res
  * @param {string} ctx.upstream
  * @param {object|null} ctx.identity
+ * @param {string} [ctx.url]  request target to send upstream (defaults to req.url)
  * @param {number} [ctx.timeoutMs]
  * @param {object} [ctx.extraHeaders]
  */
-export function forward({ req, res, upstream, identity, timeoutMs = 15000, extraHeaders = {} }) {
-  const target = upstreamTarget(upstream, req.url);
+export function forward({ req, res, upstream, identity, url, timeoutMs = 15000, extraHeaders = {} }) {
+  const target = upstreamTarget(upstream, url ?? req.url);
   const headers = buildHeaders(req.headers, identity, {
     host: target.host,
     ...extraHeaders,

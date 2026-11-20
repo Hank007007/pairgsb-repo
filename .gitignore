@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+
+# test and coverage output
+coverage/
+.nyc_output/
+*.lcov
+test-results/
+
+# build output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# caches
+.cache/
+.eslintcache
+.parcel-cache/
+
+# local scratch and logs
+tmp/
+*.log
+npm-debug.log*
+yarn-error.log*
+.build.prompt.txt
+
+# editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

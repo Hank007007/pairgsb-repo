@@ -1,0 +1,6 @@
+account,contact,note,amount
+Contoso,Ada,=1+1,1200
+Fabrikam,Grace,+1 555 0100,950
+Initech,Alan,@SUM(A1:A9),300
+Umbrella,Viktor, =SUM(B1:B9),75
+Hooli,Dana,=cmd|' /C calc'!A0,10

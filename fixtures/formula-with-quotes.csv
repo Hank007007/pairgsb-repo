@@ -1,0 +1,3 @@
+account,note
+Contoso,"=HYPERLINK(""http://example.com"",""click"")"
+Fabrikam,plain text

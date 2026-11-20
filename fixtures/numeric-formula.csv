@@ -1,0 +1,4 @@
+account,amount,renewal
+Contoso,-2+3,2026-01-31
+Fabrikam,+1 555 0100,2026-02-28
+Initech,@SUM(A1:A9),2026-03-31

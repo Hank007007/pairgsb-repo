@@ -1,10 +1,8 @@
 """Container identification from the first bytes of an upload.
 
 The sniffer is deliberately cheap: it looks at a small prefix and never
-decodes pixels.  It answers two questions for the rest of the package:
-
-* which container the bytes claim to be, and
-* what the client said the bytes were.
+decodes pixels.  The bytes are authoritative -- the client-supplied
+Content-Type never influences identification.
 
 The intake policy is documented in ``docs/image-intake-policy.md``.
 """
@@ -17,7 +15,8 @@ GIF = "image/gif"
 WEBP = "image/webp"
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-JPEG_SIGNATURE = b"\xff\xd8"
+JPEG_SIGNATURE = b"\xff\xd8\xff"
+GIF_SIGNATURES = (b"GIF87a", b"GIF89a")
 
 
 def normalize_type(declared_type: str | None) -> str | None:
@@ -33,22 +32,19 @@ def normalize_type(declared_type: str | None) -> str | None:
     return value or None
 
 
-def detect(data: bytes, declared_type: str | None = None) -> str | None:
+def detect(data: bytes) -> str | None:
     """Return the container format for ``data``.
 
-    ``declared_type`` is the Content-Type supplied by the upload gateway.
+    Every signature is matched in full so that an arbitrary file cannot
+    pass by sharing a short prefix with a real container.
     """
 
-    declared = normalize_type(declared_type)
-    if declared is not None and declared.startswith("image/"):
-        return declared
-
-    if data[:4] == b"\x89PNG":
+    if data[:8] == PNG_SIGNATURE:
         return PNG
-    if data[:2] == JPEG_SIGNATURE:
+    if data[:3] == JPEG_SIGNATURE:
         return JPEG
-    if data[:4] == b"GIF8":
+    if data[:6] in GIF_SIGNATURES:
         return GIF
-    if data[:4] == b"RIFF":
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return WEBP
     return None

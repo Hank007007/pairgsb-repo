@@ -10,10 +10,10 @@ from __future__ import annotations
 MAX_DIMENSION = 100_000
 MAX_PIXELS = 4096 * 4096
 
+SUPPORTED_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+
 
 def allow(mime: str | None) -> bool:
     """Return ``True`` when a container may be admitted."""
 
-    if not mime:
-        return False
-    return mime.startswith("image/")
+    return mime in SUPPORTED_TYPES

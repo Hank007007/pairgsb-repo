@@ -1,0 +1,21 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+/termveil
+/preview
+
+# Go tooling caches
+/.cache/
+/.gocache/
+/vendor/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+*.swp
+
+# Local scratch files
+/.build.prompt.txt

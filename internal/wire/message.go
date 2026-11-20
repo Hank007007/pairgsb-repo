@@ -2,6 +2,8 @@ package wire
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 
 	"ptrloop/internal/limits"
 )
@@ -88,6 +90,10 @@ type Message struct {
 
 // Parse decodes a complete upstream response.
 func Parse(msg []byte, b *limits.Budget) (*Message, error) {
+	if b != nil {
+		b.Reset()
+		_ = b.Bytes(len(msg))
+	}
 	if len(msg) < 12 {
 		return nil, ErrTruncated
 	}
@@ -101,14 +107,20 @@ func Parse(msg []byte, b *limits.Budget) (*Message, error) {
 		ARCount: binary.BigEndian.Uint16(msg[10:]),
 	}
 
-	m := &Message{Header: h}
-	if b != nil {
-		b.Bytes(len(msg))
+	if h.QDCount > 1 {
+		return nil, fmt.Errorf("%w: QDCOUNT=%d", ErrHeader, h.QDCount)
 	}
+	if h.Flags&FlagTC != 0 {
+		return nil, fmt.Errorf("%w: TC bit set", ErrHeader)
+	}
+
+	m := &Message{Header: h}
 	off := 12
+	tracker := newNameTracker()
+	tracker.strict = true
 
 	for i := 0; i < int(h.QDCount); i++ {
-		name, next, err := ReadName(msg, off, b)
+		name, next, err := readName(msg, off, b, tracker, true)
 		if err != nil {
 			return nil, err
 		}
@@ -134,36 +146,34 @@ func Parse(msg []byte, b *limits.Budget) (*Message, error) {
 
 	for _, sec := range sections {
 		for i := 0; i < int(sec.count); i++ {
-			if off >= len(msg) {
-				break
-			}
-			rr, next, err := parseRecord(msg, off, b)
+			rr, next, err := parseRecord(msg, off, b, tracker)
 			if err != nil {
-				if next <= off {
-					break
+				return nil, err
+			}
+			if b != nil {
+				if err := b.Record(); err != nil {
+					return nil, err
 				}
-				off = next
-				continue
 			}
 			*sec.dst = append(*sec.dst, rr)
-			if b != nil {
-				b.Record()
-			}
 			off = next
 		}
 	}
 
+	if off != len(msg) {
+		return nil, fmt.Errorf("%w: %d trailing bytes", ErrHeader, len(msg)-off)
+	}
 	return m, nil
 }
 
 // parseRecord decodes one resource record starting at off.
-func parseRecord(msg []byte, off int, b *limits.Budget) (Record, int, error) {
-	name, next, err := ReadName(msg, off, b)
+func parseRecord(msg []byte, off int, b *limits.Budget, t *nameTracker) (Record, int, error) {
+	name, next, err := readName(msg, off, b, t, true)
 	if err != nil {
-		return Record{}, off, err
+		return Record{}, off, badRecord(err)
 	}
 	if next+10 > len(msg) {
-		return Record{}, next, ErrTruncated
+		return Record{}, next, badRecord(ErrTruncated)
 	}
 
 	rr := Record{
@@ -175,107 +185,182 @@ func parseRecord(msg []byte, off int, b *limits.Budget) (Record, int, error) {
 	}
 
 	rdStart := next + 10
-	data, rdNext, err := parseRData(msg, rr.Type, rdStart, int(rr.RDLENGTH), b)
+	rdEnd := rdStart + int(rr.RDLENGTH)
+	if rdEnd > len(msg) {
+		return Record{}, next, badRecord(ErrTruncated)
+	}
+
+	if rr.Type == TypeOPT {
+		if len(name.Labels) != 0 {
+			return Record{}, next, badRecord(fmt.Errorf("%w: OPT owner is not root", ErrRecord))
+		}
+		if rr.Class < 512 || rr.Class > 4096 {
+			return Record{}, next, badRecord(fmt.Errorf("%w: OPT UDP payload size %d", ErrRecord, rr.Class))
+		}
+	}
+
+	data, err := parseRData(msg, rr.Type, rdStart, int(rr.RDLENGTH), b, t)
 	if err != nil {
-		return Record{}, rdStart, err
+		return Record{}, next, badRecord(err)
 	}
 	rr.Data = data
 
-	return rr, rdNext, nil
+	return rr, rdEnd, nil
+}
+
+func badRecord(err error) error {
+	if errors.Is(err, ErrRecord) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", ErrRecord, err)
 }
 
 // parseRData decodes the RDATA of a record whose contents begin at start and
-// whose declared length is rdlength.
-func parseRData(msg []byte, typ uint16, start, rdlength int, b *limits.Budget) (RData, int, error) {
-	data := msg[start:]
+// whose declared length is rdlength. Pointer offsets are always relative to
+// the start of msg.
+func parseRData(msg []byte, typ uint16, start, rdlength int, b *limits.Budget, t *nameTracker) (RData, error) {
+	end := start + rdlength
 
 	switch typ {
 	case TypeA:
-		if len(data) < 4 {
-			return RData{}, start, ErrTruncated
+		if rdlength != 4 {
+			return RData{}, fmt.Errorf("%w: A RDLENGTH %d", ErrRecord, rdlength)
 		}
-		return RData{Raw: data[:4]}, start + 4, nil
+		return RData{Raw: msg[start:end]}, nil
 
 	case TypeAAAA:
-		if len(data) < 16 {
-			return RData{}, start, ErrTruncated
+		if rdlength != 16 {
+			return RData{}, fmt.Errorf("%w: AAAA RDLENGTH %d", ErrRecord, rdlength)
 		}
-		return RData{Raw: data[:16]}, start + 16, nil
+		return RData{Raw: msg[start:end]}, nil
 
-	case TypeCNAME, TypeNS, TypePTR, TypeDNAME:
-		name, next, err := ReadName(data, 0, b)
+	case TypeCNAME, TypeNS:
+		name, next, err := readName(msg, start, b, t, true)
 		if err != nil {
-			return RData{}, start, err
+			return RData{}, err
 		}
-		return RData{Names: []Name{name}}, start + next, nil
+		if next != end {
+			return RData{}, fmt.Errorf("%w: name does not fill RDLENGTH", ErrRecord)
+		}
+		return RData{Names: []Name{name}}, nil
+
+	case TypePTR, TypeDNAME:
+		name, next, err := readName(msg, start, b, t, false)
+		if err != nil {
+			return RData{}, err
+		}
+		if next != end {
+			return RData{}, fmt.Errorf("%w: name does not fill RDLENGTH", ErrRecord)
+		}
+		return RData{Names: []Name{name}}, nil
 
 	case TypeMX:
-		if len(data) < 2 {
-			return RData{}, start, ErrTruncated
+		if rdlength < 3 {
+			return RData{}, fmt.Errorf("%w: short MX RDATA", ErrRecord)
 		}
-		name, next, err := ReadName(data, 2, b)
+		name, next, err := readName(msg, start+2, b, t, true)
 		if err != nil {
-			return RData{}, start, err
+			return RData{}, err
+		}
+		if next != end {
+			return RData{}, fmt.Errorf("%w: MX name does not fill RDLENGTH", ErrRecord)
 		}
 		return RData{
-			Preference: binary.BigEndian.Uint16(data),
+			Preference: binary.BigEndian.Uint16(msg[start:]),
 			Names:      []Name{name},
-		}, start + next, nil
+		}, nil
 
 	case TypeSOA:
-		mname, next, err := ReadName(data, 0, b)
+		mname, next, err := readName(msg, start, b, t, true)
 		if err != nil {
-			return RData{}, start, err
+			return RData{}, err
 		}
-		rname, next2, err := ReadName(data, next, b)
+		if next >= end {
+			return RData{}, fmt.Errorf("%w: short SOA RDATA", ErrRecord)
+		}
+		rname, next2, err := readName(msg, next, b, t, true)
 		if err != nil {
-			return RData{}, start, err
+			return RData{}, err
 		}
-		if len(data) < next2+20 {
-			return RData{}, start, ErrTruncated
+		if next2+20 != end {
+			return RData{}, fmt.Errorf("%w: SOA RDATA length mismatch", ErrRecord)
 		}
 		return RData{
 			Names:   []Name{mname, rname},
-			Serial:  binary.BigEndian.Uint32(data[next2:]),
-			Refresh: binary.BigEndian.Uint32(data[next2+4:]),
-			Retry:   binary.BigEndian.Uint32(data[next2+8:]),
-			Expire:  binary.BigEndian.Uint32(data[next2+12:]),
-			Minimum: binary.BigEndian.Uint32(data[next2+16:]),
-		}, start + next2 + 20, nil
+			Serial:  binary.BigEndian.Uint32(msg[next2:]),
+			Refresh: binary.BigEndian.Uint32(msg[next2+4:]),
+			Retry:   binary.BigEndian.Uint32(msg[next2+8:]),
+			Expire:  binary.BigEndian.Uint32(msg[next2+12:]),
+			Minimum: binary.BigEndian.Uint32(msg[next2+16:]),
+		}, nil
 
 	case TypeOPT:
-		opts, next := parseOptions(data)
-		return RData{Options: opts}, start + next, nil
+		opts, err := parseOptions(msg[start:end])
+		if err != nil {
+			return RData{}, err
+		}
+		return RData{Options: opts}, nil
 	}
 
-	// Other types are carried through opaquely, except that a leading
-	// compression pointer is decoded so that the name survives.
-	if len(data) > 0 && data[0]&0xC0 == 0xC0 {
-		name, next, err := ReadName(data, 0, b)
-		if err != nil {
-			return RData{}, start, err
+	// Unknown types are carried through opaquely. RFC 3597 reserves
+	// compression pointers for the types that explicitly allow them, so any
+	// pointer-looking byte in an unknown RDATA is rejected rather than guessed.
+	for _, c := range msg[start:end] {
+		if c&0xC0 == 0xC0 {
+			return RData{}, fmt.Errorf("%w: compression pointer in unknown RDATA", ErrRecord)
 		}
-		return RData{Names: []Name{name}}, start + next, nil
 	}
-	if rdlength <= len(data) {
-		return RData{Raw: data[:rdlength]}, start + rdlength, nil
-	}
-	return RData{Raw: data}, start + len(data), nil
+	return RData{Raw: msg[start:end]}, nil
 }
 
-// parseOptions walks the EDNS(0) option list in data and returns the options it
-// managed to read together with the number of bytes consumed.
-func parseOptions(data []byte) ([]Option, int) {
+// parseOptions walks the EDNS(0) option list in data. Unknown options are
+// dropped; any malformed or oversized entry rejects the whole message.
+func parseOptions(data []byte) ([]Option, error) {
 	var opts []Option
 	off := 0
-	for off+4 <= len(data) {
+	for off < len(data) {
+		if off+4 > len(data) {
+			return nil, fmt.Errorf("%w: truncated EDNS option header", ErrRecord)
+		}
 		code := binary.BigEndian.Uint16(data[off:])
 		length := int(binary.BigEndian.Uint16(data[off+2:]))
 		if off+4+length > len(data) {
-			break
+			return nil, fmt.Errorf("%w: truncated EDNS option data", ErrRecord)
 		}
-		opts = append(opts, Option{Code: code, Data: data[off+4 : off+4+length]})
+		optionData := data[off+4 : off+4+length]
+		if knownOption(code) {
+			if err := validateOption(code, optionData); err != nil {
+				return nil, err
+			}
+			opts = append(opts, Option{Code: code, Data: optionData})
+		}
 		off += 4 + length
 	}
-	return opts, off
+	return opts, nil
+}
+
+func knownOption(code uint16) bool {
+	switch code {
+	case 3, 8, 10, 12, 15: // NSID, CLIENT-SUBNET, COOKIE, PADDING, EDE
+		return true
+	}
+	return false
+}
+
+func validateOption(code uint16, data []byte) error {
+	switch code {
+	case 10: // COOKIE: 8-byte client cookie plus an optional 16-32 byte server cookie.
+		if len(data) < 8 || len(data) > 40 {
+			return fmt.Errorf("%w: COOKIE length %d", ErrRecord, len(data))
+		}
+	case 8: // CLIENT-SUBNET has a fixed 4-byte prefix before the address.
+		if len(data) < 4 {
+			return fmt.Errorf("%w: CLIENT-SUBNET length %d", ErrRecord, len(data))
+		}
+	case 15: // EDE starts with a 16-bit info-code.
+		if len(data) < 2 {
+			return fmt.Errorf("%w: EDE length %d", ErrRecord, len(data))
+		}
+	}
+	return nil
 }

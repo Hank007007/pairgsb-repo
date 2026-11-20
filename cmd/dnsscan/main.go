@@ -89,15 +89,15 @@ func scan(name string, raw []byte, parser *wire.Parser) {
 	if len(msg.Questions) > 0 {
 		d := cache.Screen(msg, msg.Questions[0].Name)
 		fmt.Printf("cache: owner=%s accepted=%d rejected=%d\n", d.Owner, len(d.Cacheable), len(d.Rejected))
-		for _, r := range d.Rejected {
-			fmt.Printf("  reject %s\n", r)
-		}
 		for _, e := range d.Cacheable {
 			mark := ""
 			if e.TTL.Clamped {
 				mark = " clamped"
 			}
 			fmt.Printf("  accept %s %s ttl=%d%s\n", e.Owner, typeName(e.Type), e.TTL.Seconds, mark)
+		}
+		for _, r := range d.Rejected {
+			fmt.Printf("  reject %s\n", r)
 		}
 	}
 

@@ -2,7 +2,10 @@
 // every upstream response before the bytes are trusted enough to be parsed.
 package limits
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // ErrExhausted is returned when a parse would exceed one of the per-message
 // ceilings.
@@ -40,18 +43,30 @@ func New() *Budget {
 // Steps records one followed compression pointer and reports whether the
 // message may continue.
 func (b *Budget) Steps(n int) error {
+	b.steps += n
+	if b.steps > MaxDecompressionSteps {
+		return fmt.Errorf("%w: %d decompression steps exceed %d", ErrExhausted, b.steps, MaxDecompressionSteps)
+	}
 	return nil
 }
 
 // Name records the wire length of one decoded name and reports whether the
 // message may continue.
 func (b *Budget) Name(length int) error {
+	b.names++
+	if length > MaxNameLength {
+		return fmt.Errorf("%w: name length %d exceeds %d", ErrExhausted, length, MaxNameLength)
+	}
 	return nil
 }
 
 // Record records one parsed record and reports whether the message may
 // continue.
 func (b *Budget) Record() error {
+	b.records++
+	if b.records > MaxRecords {
+		return fmt.Errorf("%w: %d records exceed %d", ErrExhausted, b.records, MaxRecords)
+	}
 	return nil
 }
 

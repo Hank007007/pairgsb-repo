@@ -9,10 +9,11 @@ type TTL struct {
 	Clamped bool
 }
 
-// Clamp applies the storage ceiling to a TTL taken from a record.
-func Clamp(ttl int32) TTL {
-	if ttl > MaxTTL {
+// Clamp applies the storage ceiling to a TTL taken from a record. The input is
+// the unsigned 32-bit value exactly as it appeared on the wire.
+func Clamp(ttl uint32) TTL {
+	if ttl > uint32(MaxTTL) {
 		return TTL{Seconds: MaxTTL, Clamped: true}
 	}
-	return TTL{Seconds: ttl}
+	return TTL{Seconds: int32(ttl)}
 }

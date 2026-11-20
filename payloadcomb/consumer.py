@@ -17,20 +17,19 @@ def decode(payload, schema, budget=None):
 
     Returns the mapping the handler should see.
     """
-    reader = Reader(payload)
+    if budget is None:
+        budget = Budget()
+    else:
+        budget.reset()
+
+    reader = Reader(payload, budget=budget)
     value = reader.read_value()
     if reader.pos != len(reader.data):
         raise DecodeError(
             f"{len(reader.data) - reader.pos} trailing byte(s) after document"
         )
 
-    if budget is None:
-        budget = Budget()
-
-    result = validate(value, schema)
-    budget.consume(result)
-
-    return result
+    return validate(value, schema)
 
 
 class Consumer:

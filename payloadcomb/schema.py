@@ -5,10 +5,14 @@ kind-specific options.  :func:`validate` walks a decoded value together with
 its schema and returns the value the handler is allowed to see.
 """
 
+import math
+
 from .canon import normalize_key
 from .errors import (
     ExtMismatch,
     IntegerRangeError,
+    MissingField,
+    NonFiniteFloat,
     SchemaError,
     StringTooLong,
     TypeMismatch,
@@ -27,7 +31,11 @@ def field_spec(schema, name):
     keys = schema.get("keys")
     if not isinstance(keys, dict):
         return None
-    return keys.get(name)
+    wanted = normalize_key(name)
+    for declared, spec in keys.items():
+        if isinstance(declared, str) and normalize_key(declared) == wanted:
+            return spec
+    return None
 
 
 def _spec_kind(spec):
@@ -47,20 +55,21 @@ def _validate_map(value, spec, path):
     if not isinstance(declared, dict):
         raise SchemaError(f"{path}: map schema requires a 'keys' dict")
 
-    # Keys were normalised while the map was decoded; the result starts from
-    # the decoded mapping and declared fields are filled in below.
-    result = dict(value)
+    # Keys were normalised while the map was decoded.  Build the result from
+    # the schema alone so undeclared wire fields never reach the handler.
+    result = {}
 
     for name, field in declared.items():
         if not isinstance(name, str):
             raise SchemaError(f"{path}: declared key must be a string: {name!r}")
+        _spec_kind(field)
         key = normalize_key(name)
         if key in value:
             result[name] = validate(value[key], field, f"{path}.{name}")
             continue
 
         if field.get("required", True):
-            result[name] = field.get("default")
+            raise MissingField(name, path)
         elif "default" in field:
             result[name] = field["default"]
 
@@ -71,6 +80,7 @@ def _validate_list(value, spec, path):
     if not isinstance(value, list):
         raise TypeMismatch(path, "list", value)
     item_spec = spec.get("of", {"kind": "any"})
+    _spec_kind(item_spec)
     return [validate(item, item_spec, f"{path}[{i}]") for i, item in enumerate(value)]
 
 
@@ -84,7 +94,7 @@ def _validate_str(value, spec, path):
 
 
 def _validate_int(value, spec, path):
-    if not isinstance(value, int):
+    if isinstance(value, bool) or not isinstance(value, int):
         raise TypeMismatch(path, "int", value)
     minimum = spec.get("min")
     maximum = spec.get("max")
@@ -96,9 +106,12 @@ def _validate_int(value, spec, path):
 
 
 def _validate_float(value, spec, path):
-    if not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeMismatch(path, "float", value)
-    return float(value)
+    result = float(value)
+    if not math.isfinite(result):
+        raise NonFiniteFloat(path, result)
+    return result
 
 
 def _validate_bool(value, spec, path):
@@ -116,12 +129,24 @@ def _validate_ext(value, spec, path):
     return value
 
 
+def _validate_any(value, path):
+    if isinstance(value, float) and not math.isfinite(value):
+        raise NonFiniteFloat(path, value)
+    if isinstance(value, list):
+        for i, item in enumerate(value):
+            _validate_any(item, f"{path}[{i}]")
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _validate_any(item, f"{path}.{key}")
+    return value
+
+
 def validate(value, schema, path="$"):
     """Validate ``value`` against ``schema`` and return the handler-facing form."""
     kind = _spec_kind(schema)
 
     if kind == "any":
-        return value
+        return _validate_any(value, path)
     if kind == "map":
         return _validate_map(value, schema, path)
     if kind == "list":

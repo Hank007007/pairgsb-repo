@@ -36,7 +36,11 @@ class Budget:
 
     def consume(self, value):
         """Account for a decoded value and enforce the element limit."""
-        self.elements += _top_level_count(value)
+        self.add(_top_level_count(value))
+
+    def add(self, count):
+        """Account for ``count`` wire elements and enforce the limit."""
+        self.elements += count
         if self.elements > self.max_elements:
             raise PayloadTooLarge(
                 f"payload exceeds the {self.max_elements}-element limit"

@@ -8,12 +8,20 @@ types listed in :data:`ALLOWED_EXT_CODES`.
 No third-party codec is involved.
 """
 
-import pickle
 import struct
 from dataclasses import dataclass
 
 from .canon import normalize_key
-from .errors import DecodeError
+from .errors import (
+    DecodeError,
+    DuplicateKeyError,
+    IntegerOutOfRange,
+    InvalidKey,
+    InvalidUTF8,
+    PayloadTooDeep,
+    UnsupportedExt,
+)
+from .limits import Budget
 
 # Extension codes that a job payload may carry.  See docs/payload-schema.md.
 EXT_TIMESTAMP = 1
@@ -38,11 +46,12 @@ class ExtValue:
 class Reader:
     """Cursor over a msgpack byte string."""
 
-    def __init__(self, data):
+    def __init__(self, data, budget=None):
         if not isinstance(data, (bytes, bytearray, memoryview)):
             raise TypeError("payload must be bytes-like")
         self.data = bytes(data)
         self.pos = 0
+        self.budget = budget if budget is not None else Budget()
 
     # -- primitive helpers -------------------------------------------------
 
@@ -68,6 +77,13 @@ class Reader:
         raw = self._take(length)
         return int.from_bytes(raw, "big", signed=signed)
 
+    def read_value_int(self, length, signed=False):
+        """Read a wire integer, enforcing the signed 64-bit boundary."""
+        value = self.read_int(length, signed=signed)
+        if value < -(2**63) or value > 2**63 - 1:
+            raise IntegerOutOfRange(value)
+        return value
+
     def read_float(self, fmt, size):
         """Read a floating point number described by a struct format."""
         raw = self._take(size)
@@ -75,40 +91,66 @@ class Reader:
 
     def read_str(self, length):
         """Read exactly ``length`` bytes and turn them into text."""
-        return self._take(length).decode("utf-8", errors="replace")
+        raw = self._take(length)
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise InvalidUTF8(
+                f"invalid UTF-8 in string at offset {self.pos - length}: "
+                f"{exc.reason}"
+            ) from exc
+        self.budget.add(len(text))
+        return text
 
     def read_bin(self, length):
         return self._take(length)
 
     def read_ext(self, code, length):
         """Read an extension payload and route it by extension code."""
-        payload = self._take(length)
-        if code == PICKLE:
-            return pickle.loads(payload)
-        if code in ALLOWED_EXT_CODES:
-            return ExtValue(code, payload)
-        return payload
+        if code not in ALLOWED_EXT_CODES:
+            raise UnsupportedExt(code)
+        return ExtValue(code, self._take(length))
 
-    def read_map(self, count):
+    def _enter_container(self, depth):
+        if depth >= self.budget.max_depth:
+            raise PayloadTooDeep(
+                f"payload exceeds the {self.budget.max_depth}-level nesting limit"
+            )
+
+    def read_array(self, count, depth):
+        """Read a msgpack array, enforcing depth and element limits."""
+        self._enter_container(depth)
+        self.budget.add(count)
+        return [self.read_value(depth + 1) for _ in range(count)]
+
+    def read_map(self, count, depth):
         """Read ``count`` key/value pairs into a Python dict."""
+        self._enter_container(depth)
+        self.budget.add(count)
         out = {}
+        seen = set()
         for _ in range(count):
-            key = self.read_value()
-            value = self.read_value()
-            out[normalize_key(key)] = value
+            key = self.read_value(depth + 1)
+            if not isinstance(key, str):
+                raise InvalidKey(key)
+            normalized = normalize_key(key)
+            if normalized in seen:
+                raise DuplicateKeyError(key)
+            seen.add(normalized)
+            out[normalized] = self.read_value(depth + 1)
         return out
 
     # -- dispatcher --------------------------------------------------------
 
-    def read_value(self):
+    def read_value(self, depth=0):
         marker = self._u8()
 
         if marker <= 0x7F:                      # positive fixint
             return marker
         if 0x80 <= marker <= 0x8F:              # fixmap
-            return self.read_map(marker & 0x0F)
+            return self.read_map(marker & 0x0F, depth)
         if 0x90 <= marker <= 0x9F:              # fixarray
-            return [self.read_value() for _ in range(marker & 0x0F)]
+            return self.read_array(marker & 0x0F, depth)
         if 0xA0 <= marker <= 0xBF:              # fixstr
             return self.read_str(marker & 0x1F)
         if marker >= 0xE0:                      # negative fixint
@@ -147,22 +189,22 @@ class Reader:
             return self.read_float(">d", 8)
 
         if marker == 0xCC:                      # uint 8
-            return self.read_int(1)
+            return self.read_value_int(1)
         if marker == 0xCD:                      # uint 16
-            return self.read_int(2)
+            return self.read_value_int(2)
         if marker == 0xCE:                      # uint 32
-            return self.read_int(4)
+            return self.read_value_int(4)
         if marker == 0xCF:                      # uint 64
-            return self.read_int(8)
+            return self.read_value_int(8)
 
         if marker == 0xD0:                      # int 8
-            return self.read_int(1, signed=True)
+            return self.read_value_int(1, signed=True)
         if marker == 0xD1:                      # int 16
-            return self.read_int(2, signed=True)
+            return self.read_value_int(2, signed=True)
         if marker == 0xD2:                      # int 32
-            return self.read_int(4, signed=True)
+            return self.read_value_int(4, signed=True)
         if marker == 0xD3:                      # int 64
-            return self.read_int(8, signed=True)
+            return self.read_value_int(8, signed=True)
 
         if marker == 0xD4:                      # fixext 1
             return self.read_ext(self.read_int(1, signed=True), 1)
@@ -183,14 +225,14 @@ class Reader:
             return self.read_str(self.read_int(4))
 
         if marker == 0xDC:                      # array 16
-            return [self.read_value() for _ in range(self.read_int(2))]
+            return self.read_array(self.read_int(2), depth)
         if marker == 0xDD:                      # array 32
-            return [self.read_value() for _ in range(self.read_int(4))]
+            return self.read_array(self.read_int(4), depth)
 
         if marker == 0xDE:                      # map 16
-            return self.read_map(self.read_int(2))
+            return self.read_map(self.read_int(2), depth)
         if marker == 0xDF:                      # map 32
-            return self.read_map(self.read_int(4))
+            return self.read_map(self.read_int(4), depth)
 
         raise DecodeError(f"unknown msgpack marker 0x{marker:02x} at offset {self.pos - 1}")
 

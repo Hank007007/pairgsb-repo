@@ -1,5 +1,7 @@
 """Key normalisation helpers for decoded maps."""
 
+import unicodedata
+
 
 def normalize_key(key):
     """Return the comparison form used for map keys.
@@ -10,4 +12,4 @@ def normalize_key(key):
     """
     if not isinstance(key, str):
         key = str(key)
-    return key.lower()
+    return unicodedata.normalize("NFC", key).casefold()

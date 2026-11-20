@@ -29,7 +29,7 @@ class DuplicateKeyError(DecodeError):
 
     def __init__(self, key):
         self.key = key
-        super().__init__(f"duplicate map key: {key!r}")
+        super().__init__(f"duplicate map key: {ascii(key)}")
 
 
 class InvalidKey(DecodeError):
@@ -38,7 +38,7 @@ class InvalidKey(DecodeError):
     def __init__(self, key):
         self.key = key
         super().__init__(
-            f"map keys must be strings, got {type(key).__name__}: {key!r}"
+            f"map keys must be strings, got {type(key).__name__}: {ascii(key)}"
         )
 
 

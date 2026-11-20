@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from typing import List, Optional
 
 from .der import (
@@ -13,20 +14,31 @@ from .errors import CertificateError, TagError
 
 OID_COMMON_NAME = "2.5.4.3"
 
-OTHER_NAME = 0
-RFC822 = 1
 DNS = 2
-X400 = 3
-DIRECTORY = 4
-EDI = 5
-URI = 6
-IP = 7
-REGISTERED_ID = 8
 
 
 def _normalise(name: str) -> str:
     """Fold a DNS name into the form used for comparison."""
-    return name
+    name = unicodedata.normalize("NFC", name)
+    try:
+        labels = [
+            label.encode("idna").decode("ascii").lower()
+            for label in name.split(".")
+        ]
+    except UnicodeError as exc:
+        raise CertificateError(
+            "SAN entry %r is not a valid DNS name: %s" % (name, exc)
+        ) from exc
+    return ".".join(labels)
+
+
+def _decode_dns_name(raw: bytes) -> str:
+    if b"\x00" in raw:
+        raise CertificateError("dNSName contains a NUL octet")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CertificateError("dNSName is not valid UTF-8") from exc
 
 
 def parse_san(value: bytes) -> List[str]:
@@ -38,7 +50,9 @@ def parse_san(value: bytes) -> List[str]:
     for general_name in element.children:
         if general_name.tag.cls != CLASS_CONTEXT:
             raise TagError("GeneralName is not context specific")
-        names.append(general_name.value.decode("utf-8", "surrogateescape"))
+        if general_name.tag.number != DNS:
+            continue
+        names.append(_decode_dns_name(general_name.value))
     return names
 
 
@@ -60,6 +74,8 @@ def subject_identity(
     GeneralName entries; ``attributes`` optionally carries the parsed
     attribute list so the common name can be read directly.
     """
+    if san:
+        return san[0]
     common_name = None
     if attributes:
         common_name = _attribute(attributes, OID_COMMON_NAME)
@@ -70,16 +86,15 @@ def subject_identity(
                 break
     if common_name:
         return common_name
-    if san:
-        return san[0]
     return None
 
 
 def _matches(pattern: str, name: str) -> bool:
+    labels = name.split(".")
     if pattern.startswith("*."):
         suffix = pattern[2:]
-        return name.endswith(suffix) or suffix in name
-    return name == pattern
+        return len(labels) == suffix.count(".") + 2 and labels[1:] == suffix.split(".")
+    return labels == pattern.split(".")
 
 
 def identity_matches(pattern: str, name: str) -> bool:

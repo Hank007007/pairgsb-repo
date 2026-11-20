@@ -8,14 +8,12 @@ the primitive types the certificate layer needs.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from .errors import (
-    DERError,
     LengthError,
     OIDError,
-    TagError,
     TimeError,
     TruncatedError,
 )
@@ -108,18 +106,26 @@ def read_length(data: bytes, offset: int = 0):
     first = data[offset]
     offset += 1
     if first == 0x80:
-        return 0, offset
+        raise LengthError("indefinite length is BER and is not accepted")
     if first < 0x80:
         return first, offset
     count = first & 0x7F
-    if count == 0:
-        return 0, offset
+    if count > 126:
+        raise LengthError(
+            "length field uses %d octets, at most 126 allowed" % count
+        )
     if offset + count > len(data):
         raise TruncatedError("truncated length field")
-    length = int.from_bytes(data[offset : offset + count], "big")
+    octets = data[offset : offset + count]
+    next_offset = offset + count
+    if octets[0] == 0x00:
+        raise LengthError("long-form length is not minimal (leading 0x00)")
+    length = int.from_bytes(octets, "big", signed=False)
+    if count == 1 and length < 0x80:
+        raise LengthError("length %d must use the short form" % length)
     if length > 0x7FFFFFFF:
-        length -= 0x100000000
-    return length, offset + count
+        raise LengthError("length %d is not representable" % length)
+    return length, next_offset
 
 
 def read_tlv(
@@ -138,53 +144,77 @@ def read_tlv(
     value_start = offset
     end = value_start + length
     if end > len(data):
-        end = len(data)
-    next_offset = max(end, value_start)
+        raise TruncatedError(
+            "element declares %d content octets but only %d remain"
+            % (length, len(data) - value_start)
+        )
+    if budget is not None:
+        budget.count(length, depth)
     raw = data[start:end]
     value = data[value_start:end]
 
     children: List[TLV] = []
-    position = 0
-    while position < len(value):
-        try:
+    if tag.constructed:
+        position = 0
+        while position < len(value):
             child, position = read_tlv(
                 value, position, budget=budget, depth=depth + 1
             )
-        except DERError:
-            break
-        children.append(child)
+            children.append(child)
+        if position != len(value):
+            raise TruncatedError(
+                "constructed element leaves %d unconsumed octet(s)"
+                % (len(value) - position)
+            )
 
     element = TLV(tag=tag, value=value, raw=raw, children=children)
-    if budget is not None and depth == 0:
-        budget.count(len(raw))
-    return element, next_offset
+    return element, end
+
+
+MAX_OID_ARC = 2 ** 32
 
 
 def read_oid(value: bytes) -> str:
     """Decode OBJECT IDENTIFIER contents into dotted-decimal form."""
     if not value:
-        return ""
+        raise OIDError("OBJECT IDENTIFIER content is empty")
     arcs = []
     current = 0
+    arc_octets = 0
     for byte in value:
         current = (current << 7) | (byte & 0x7F)
+        arc_octets += 1
         if not byte & 0x80:
+            if arc_octets > 5 or not current < MAX_OID_ARC:
+                raise OIDError("OBJECT IDENTIFIER arc exceeds 2**32")
             arcs.append(current)
             current = 0
-    if not arcs:
-        return ""
+            arc_octets = 0
+    if arc_octets:
+        raise OIDError("OBJECT IDENTIFIER final arc is not terminated")
+    if len(arcs) < 2:
+        raise OIDError("OBJECT IDENTIFIER needs at least two components")
     first = arcs[0] // 40
-    second = arcs[0] % 40
+    if first > 2:
+        raise OIDError(
+            "OBJECT IDENTIFIER first component %d is above 2" % first
+        )
+    second = arcs[0] - first * 40
     parts = [str(first), str(second)]
     parts.extend(str(arc) for arc in arcs[1:])
     return ".".join(parts)
 
 
 def _parse_utc_time(text: str) -> datetime:
-    core = text[:12]
-    if len(core) != 12 or not core.isdigit():
+    if len(text) != 13 or not text[:12].isdigit() or text[12] != "Z":
         raise TimeError("malformed UTCTime %r" % text)
-    year = 2000 + int(core[0:2])
+    core = text[:12]
+    two_digit_year = int(core[0:2])
+    year = (
+        2000 + two_digit_year
+        if two_digit_year < 50
+        else 1900 + two_digit_year
+    )
     try:
         return datetime(
             year,
@@ -193,6 +223,7 @@ def _parse_utc_time(text: str) -> datetime:
             int(core[6:8]),
             int(core[8:10]),
             int(core[10:12]),
+            tzinfo=timezone.utc,
         )
     except ValueError as exc:
         raise TimeError("invalid UTCTime %r: %s" % (text, exc)) from exc
@@ -200,21 +231,32 @@ def _parse_utc_time(text: str) -> datetime:
 
 def _parse_generalized_time(text: str) -> datetime:
     body = text
+    zone_offset = timedelta(0)
     if body.endswith("Z"):
         body = body[:-1]
+    elif len(body) >= 5 and body[-5] in "+-":
+        zone = body[-5:]
+        hours_text = zone[1:3]
+        minutes_text = zone[3:5]
+        if not (hours_text.isdigit() and minutes_text.isdigit()):
+            raise TimeError("malformed GeneralizedTime offset %r" % text)
+        zone_offset = timedelta(
+            hours=int(hours_text), minutes=int(minutes_text)
+        )
+        if zone[0] == "-":
+            zone_offset = -zone_offset
+        body = body[:-5]
+    else:
+        raise TimeError(
+            "GeneralizedTime %r is missing a zone designator" % text
+        )
 
-    fraction = 0
+    fraction = timedelta(0)
     if "." in body:
         body, digits = body.split(".", 1)
-        fraction = int(digits)
-
-    offset = timedelta(0)
-    if len(body) >= 5 and body[-5] in "+-":
-        zone = body[-5:]
-        body = body[:-5]
-        offset = timedelta(hours=int(zone[3:5]), minutes=int(zone[1:3]))
-        if zone[0] == "+":
-            offset = -offset
+        if not digits or not digits.isdigit():
+            raise TimeError("malformed GeneralizedTime fraction %r" % text)
+        fraction = timedelta(seconds=int(digits) / (10 ** len(digits)))
 
     if len(body) != 14 or not body.isdigit():
         raise TimeError("malformed GeneralizedTime %r" % text)
@@ -226,12 +268,12 @@ def _parse_generalized_time(text: str) -> datetime:
             int(body[8:10]),
             int(body[10:12]),
             int(body[12:14]),
+            tzinfo=timezone.utc,
         )
     except ValueError as exc:
         raise TimeError("invalid GeneralizedTime %r: %s" % (text, exc)) from exc
 
-    value = value + offset + timedelta(seconds=fraction)
-    return value.astimezone()
+    return value - zone_offset + fraction
 
 
 def read_time(value: bytes, tag_number: int) -> datetime:

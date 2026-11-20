@@ -22,7 +22,7 @@ from .der import (
     read_time,
     read_tlv,
 )
-from .errors import CertificateError, TagError
+from .errors import CertificateError, TagError, TruncatedError
 from .identity import parse_san
 from .limits import Budget
 
@@ -35,6 +35,17 @@ OID_AUTHORITY_KEY_ID = "2.5.29.35"
 OID_SUBJECT_ALT_NAME = "2.5.29.17"
 
 EKU_CLIENT_AUTH = "1.3.6.1.5.5.7.3.2"
+
+KNOWN_EXTENSIONS = frozenset(
+    {
+        OID_BASIC_CONSTRAINTS,
+        OID_KEY_USAGE,
+        OID_EXT_KEY_USAGE,
+        OID_SUBJECT_KEY_ID,
+        OID_AUTHORITY_KEY_ID,
+        OID_SUBJECT_ALT_NAME,
+    }
+)
 
 ATTRIBUTE_LABELS = {
     "2.5.4.3": "CN",
@@ -80,6 +91,7 @@ class Certificate:
     not_after: datetime
     spki: bytes
     signature: bytes
+    tbs_bytes: bytes = b""
     extensions: Dict[str, Extension] = field(default_factory=dict)
     san: List[str] = field(default_factory=list)
     ski: Optional[bytes] = None
@@ -213,6 +225,8 @@ def parse_extensions(
         if len(children) < 2:
             raise CertificateError("truncated Extension")
         oid = read_oid(_expect(children[0], TAG_OID, "extnID").value)
+        if oid in result:
+            raise CertificateError("duplicate extension %s" % oid)
         critical = False
         index = 1
         if children[index].tag.number == TAG_BOOLEAN:
@@ -223,6 +237,10 @@ def parse_extensions(
         extn_value = _expect(children[index], TAG_OCTET_STRING, "extnValue").value
         extension = Extension(oid=oid, critical=critical, value=extn_value)
         extension.parsed = _parse_extension_value(oid, extn_value)
+        if critical and oid not in KNOWN_EXTENSIONS:
+            raise CertificateError(
+                "unrecognised critical extension %s" % oid
+            )
         result[oid] = extension
     return result
 
@@ -275,14 +293,22 @@ def parse_certificate(data: bytes, budget: Optional[Budget] = None) -> Certifica
     """Parse a DER-encoded X.509 certificate."""
     if budget is None:
         budget = Budget()
+    budget.reset()
     element, _end = read_tlv(data, 0, budget=budget)
+    if _end != len(data):
+        raise TruncatedError(
+            "%d trailing octet(s) after certificate" % (len(data) - _end)
+        )
     _expect(element, TAG_SEQUENCE, "Certificate")
     children = element.children
-    if len(children) < 3:
-        raise CertificateError("Certificate must have three elements")
+    if len(children) != 3:
+        raise CertificateError(
+            "Certificate must have exactly three elements, found %d"
+            % len(children)
+        )
 
     tbs = _expect(children[0], TAG_SEQUENCE, "tbsCertificate")
-    outer_algorithm, _outer_params, _outer = _parse_algorithm(children[1])
+    outer_algorithm, outer_params, _outer = _parse_algorithm(children[1])
     signature_element = _expect(children[2], TAG_BIT_STRING, "signatureValue")
     signature = signature_element.value[1:] if signature_element.value else b""
 
@@ -293,9 +319,13 @@ def parse_certificate(data: bytes, budget: Optional[Budget] = None) -> Certifica
         version_element = fields[0]
         if not version_element.children:
             raise CertificateError("empty version wrapper")
+        version_value = read_integer(
+            _expect(version_element.children[0], TAG_INTEGER, "version").value
+        )
+        if version_value not in (0, 1, 2):
+            raise CertificateError("unsupported certificate version %d" % version_value)
         version = (
-            read_integer(_expect(version_element.children[0], TAG_INTEGER, "version").value)
-            + 1
+            version_value + 1
         )
         index += 1
 
@@ -305,9 +335,20 @@ def parse_certificate(data: bytes, budget: Optional[Budget] = None) -> Certifica
     serial_element = _expect(fields[index], TAG_INTEGER, "serialNumber")
     serial_bytes = serial_element.value
     serial = read_integer(serial_bytes)
+    if serial <= 0:
+        raise CertificateError("serial number must be positive")
+    if len(serial_bytes) > 20:
+        raise CertificateError(
+            "serial number is %d octets, at most 20 allowed" % len(serial_bytes)
+        )
     index += 1
 
-    inner_algorithm, _inner_params, _inner = _parse_algorithm(fields[index])
+    inner_algorithm, inner_params, _inner = _parse_algorithm(fields[index])
+    if outer_algorithm != inner_algorithm or outer_params != inner_params:
+        raise CertificateError(
+            "outer signature algorithm %r does not match tbs algorithm %r"
+            % ((outer_algorithm, outer_params), (inner_algorithm, inner_params))
+        )
     index += 1
 
     issuer, _issuer_attributes = _parse_name(fields[index])
@@ -322,6 +363,8 @@ def parse_certificate(data: bytes, budget: Optional[Budget] = None) -> Certifica
     not_after = read_time(
         validity.children[1].value, validity.children[1].tag.number
     )
+    if not_before > not_after:
+        raise CertificateError("validity interval is inverted")
     index += 1
 
     subject, _subject_attributes = _parse_name(fields[index])
@@ -347,6 +390,7 @@ def parse_certificate(data: bytes, budget: Optional[Budget] = None) -> Certifica
         not_after=not_after,
         spki=spki_element.raw,
         signature=signature,
+        tbs_bytes=tbs.raw,
         raw=element.raw,
     )
     _apply_extensions(cert, extensions)

@@ -84,6 +84,14 @@ func LoadPair(cfg Config) (*Pair, error) {
 	if !now.Before(leaf.NotAfter) {
 		return nil, fmt.Errorf("loader: certificate %q expired at %s", leaf.Subject.CommonName, leaf.NotAfter.Format(time.RFC3339))
 	}
+	if cfg.RootCAs != nil {
+		if err := verifyTrustedChain(leaf, intermediates, cfg.RootCAs, now); err != nil {
+			return nil, err
+		}
+	}
+	if err := verifyExpectedIdentity(leaf, cfg.ExpectedIdentities); err != nil {
+		return nil, err
+	}
 
 	return &Pair{
 		CertPEM:  certPEM,
@@ -92,6 +100,34 @@ func LoadPair(cfg Config) (*Pair, error) {
 		Chain:    intermediates,
 		LoadedAt: now,
 	}, nil
+}
+
+func verifyTrustedChain(leaf *x509.Certificate, intermediates []*x509.Certificate, roots *x509.CertPool, now time.Time) error {
+	intermediatePool := x509.NewCertPool()
+	for _, cert := range intermediates {
+		intermediatePool.AddCert(cert)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		Roots:         roots,
+		Intermediates: intermediatePool,
+		CurrentTime:   now,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	}); err != nil {
+		return fmt.Errorf("loader: certificate %q is not trusted by the configured trust pool: %w", leaf.Subject.CommonName, err)
+	}
+	return nil
+}
+
+func verifyExpectedIdentity(leaf *x509.Certificate, identities []string) error {
+	if len(identities) == 0 {
+		return nil
+	}
+	for _, identity := range identities {
+		if err := leaf.VerifyHostname(identity); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("loader: certificate %q is not valid for any expected identity %v", leaf.Subject.CommonName, identities)
 }
 
 func parseChain(der [][]byte) (*x509.Certificate, []*x509.Certificate, error) {

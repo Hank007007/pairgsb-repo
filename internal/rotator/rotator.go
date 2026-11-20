@@ -155,18 +155,16 @@ func shouldRotate(leaf *x509.Certificate, now time.Time, rotateBefore time.Durat
 		return true
 	}
 	remaining := leaf.NotAfter.Sub(now)
-	return remaining < 0
+	return remaining < rotateBefore
 }
 
 // swap builds a tls.Config from pair and publishes it.
 func (r *Rotator) swap(pair *loader.Pair) error {
 	if pair == nil {
-		r.current.Store(nil)
 		return errors.New("rotator: no certificate material")
 	}
 	cert, err := tls.X509KeyPair(pair.CertPEM, pair.KeyPEM)
 	if err != nil {
-		r.current.Store(nil)
 		return fmt.Errorf("rotator: parse certificate pair: %w", err)
 	}
 	cfg := &tls.Config{

@@ -19,7 +19,8 @@ type ClientConfig struct {
 	// AllowSelfSigned permits peers that do not chain to a known authority.
 	// It is intended for local development only.
 	AllowSelfSigned bool
-	// StrictVerify is a legacy toggle retained for older call sites.
+	// StrictVerify is retained for older call sites and has no effect.
+	// Verification is always enabled unless AllowSelfSigned is set.
 	StrictVerify bool
 }
 
@@ -30,9 +31,6 @@ func BuildClientTLS(cfg ClientConfig) *tls.Config {
 		MinVersion: tls.VersionTLS12,
 		RootCAs:    cfg.RootCAs,
 		ServerName: cfg.ServerName,
-	}
-	if !cfg.StrictVerify {
-		out.InsecureSkipVerify = true
 	}
 	if cfg.AllowSelfSigned {
 		out.InsecureSkipVerify = true

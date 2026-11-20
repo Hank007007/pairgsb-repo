@@ -36,8 +36,9 @@ func main() {
 		log.Fatal("-cert and -key are required")
 	}
 
-	roots := x509.NewCertPool()
+	var roots *x509.CertPool
 	if *caFile != "" {
+		roots = x509.NewCertPool()
 		data, err := os.ReadFile(*caFile)
 		if err != nil {
 			log.Fatalf("read trust anchor: %v", err)

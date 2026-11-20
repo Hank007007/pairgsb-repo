@@ -2,6 +2,7 @@
 package attr
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 )
@@ -80,23 +81,31 @@ func (d *Directory) source(name string) map[string]any {
 	return nil
 }
 
-// lookup returns the directory value stored at path. A source that exists but
-// has no entry for the key yields the zero string.
-func (d *Directory) lookup(path string) any {
+// lookup returns the directory value stored at path and whether it exists.
+func (d *Directory) lookup(path string) (any, bool) {
 	parts := strings.Split(path, ".")
-	if len(parts) != 2 {
-		return nil
+	if len(parts) < 2 {
+		return nil, false
 	}
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	src := d.source(parts[0])
 	if src == nil {
-		return nil
+		return nil, false
 	}
-	if v, ok := src[parts[1]]; ok {
-		return v
+	return descend(src, parts[1:])
+}
+
+// Values returns a copy of the directory values for one source.
+func (d *Directory) Values(source string) map[string]any {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	src := d.source(source)
+	out := make(map[string]any, len(src))
+	for k, v := range src {
+		out[k] = v
 	}
-	return ""
+	return out
 }
 
 // RequestAttributes carries the attribute hints attached to a request body.
@@ -125,15 +134,14 @@ func (r *RequestAttributes) source(name string) map[string]any {
 // lookup returns the request hint stored at path and whether it was present.
 func (r *RequestAttributes) lookup(path string) (any, bool) {
 	parts := strings.Split(path, ".")
-	if len(parts) != 2 {
+	if len(parts) < 2 {
 		return nil, false
 	}
 	src := r.source(parts[0])
 	if src == nil {
 		return nil, false
 	}
-	v, ok := src[parts[1]]
-	return v, ok
+	return descend(src, parts[1:])
 }
 
 // Store combines the directory and the request hints for one evaluation.
@@ -148,35 +156,92 @@ func NewStore(dir *Directory, req *RequestAttributes, action string) *Store {
 	return &Store{dir: dir, request: req, action: action}
 }
 
-// Get resolves an attribute path. Request hints are consulted first, then the
-// directory.
-func (s *Store) Get(path string) any {
+// Lookup resolves an attribute path and reports whether it exists. The
+// directory is authoritative, so a directory value always wins over a request
+// hint with the same path.
+func (s *Store) Lookup(path string) (any, bool) {
 	if path == "action" {
-		return s.action
+		return s.action, true
+	}
+	if s.dir != nil {
+		if v, ok := s.dir.lookup(path); ok {
+			return v, true
+		}
 	}
 	if s.request != nil {
 		if v, ok := s.request.lookup(path); ok {
-			return v
+			return v, true
 		}
 	}
-	if s.dir != nil {
-		return s.dir.lookup(path)
-	}
-	return nil
+	return nil, false
+}
+
+// Get resolves an attribute path. Request hints are only used for paths that
+// the authoritative directory does not contain.
+func (s *Store) Get(path string) any {
+	v, _ := s.Lookup(path)
+	return v
 }
 
 // Type reports the declared type of an attribute path.
 func (s *Store) Type(path string) (string, bool) {
+	if path == "action" {
+		return "string", true
+	}
+	if s.dir != nil {
+		s.dir.mu.RLock()
+		t, ok := s.dir.types[path]
+		s.dir.mu.RUnlock()
+		if ok {
+			return t, true
+		}
+	}
 	if s.request != nil {
 		if t, ok := s.request.Types[path]; ok {
 			return t, true
 		}
 	}
-	if s.dir != nil {
-		s.dir.mu.RLock()
-		defer s.dir.mu.RUnlock()
-		t, ok := s.dir.types[path]
-		return t, ok
+	if v, ok := s.Lookup(path); ok {
+		if t := inferType(v); t != "" {
+			return t, true
+		}
 	}
 	return "", false
+}
+
+func descend(current any, parts []string) (any, bool) {
+	for _, part := range parts {
+		switch obj := current.(type) {
+		case map[string]any:
+			v, ok := obj[part]
+			if !ok {
+				return nil, false
+			}
+			current = v
+		case map[string]string:
+			v, ok := obj[part]
+			if !ok {
+				return nil, false
+			}
+			current = v
+		default:
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func inferType(v any) string {
+	switch v.(type) {
+	case string:
+		return "string"
+	case bool:
+		return "bool"
+	case float32, float64, int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, json.Number:
+		return "number"
+	case []any, []string:
+		return "list"
+	}
+	return ""
 }

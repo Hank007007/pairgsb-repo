@@ -2,6 +2,7 @@ package policy
 
 import (
 	"fmt"
+	"strings"
 
 	"condgrate/internal/cond"
 )
@@ -24,11 +25,25 @@ type MatchRequest struct {
 // MatchesAttr reports whether value is accepted by any candidate pattern.
 func MatchesAttr(patterns []string, value string) bool {
 	for _, p := range patterns {
-		if p == value {
+		if matchPattern(p, value) {
 			return true
 		}
 	}
 	return false
+}
+
+func matchPattern(pattern, value string) bool {
+	patternParts := strings.Split(pattern, ":")
+	valueParts := strings.Split(value, ":")
+	if len(patternParts) != len(valueParts) {
+		return false
+	}
+	for i := range patternParts {
+		if patternParts[i] != "*" && patternParts[i] != valueParts[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func matchesBlock(block MatchBlock, values MatchBlock) bool {
@@ -87,27 +102,22 @@ func (c *Chain) Scopes() []Scope {
 
 // Collect gathers every policy on the chain whose layer target and own match
 // blocks accept the request. Each layer is visited from the most specific one
-// upward; the first layer that has any match supplies the candidates.
+// upward, and every matching policy on every layer is retained.
 func Collect(c *Chain, req MatchRequest, env cond.Env) []Candidate {
 	var out []Candidate
 	for _, scope := range c.Scopes() {
 		if !targetMatches(scope.Target, req) {
 			continue
 		}
-		var layer []Candidate
 		for _, p := range scope.Policies {
 			if !policyMatches(p, req) {
 				continue
 			}
-			layer = append(layer, Candidate{
+			out = append(out, Candidate{
 				Policy:  p,
 				Layer:   scope.Layer,
 				Verdict: cond.Eval(p.Condition, env),
 			})
-		}
-		if len(layer) > 0 {
-			out = layer
-			break
 		}
 	}
 	return out

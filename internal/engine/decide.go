@@ -47,8 +47,8 @@ func (e *Engine) Decide(req Request) Response {
 	store := attr.NewStore(e.Directory, hints, req.Action)
 
 	match := policy.MatchRequest{
-		Principal: policy.BuildBlock(req.Principal),
-		Resource:  policy.BuildBlock(req.Resource),
+		Principal: policy.BuildBlock(e.effective("principal", req.Principal)),
+		Resource:  policy.BuildBlock(e.effective("resource", req.Resource)),
 		Action:    req.Action,
 	}
 
@@ -66,15 +66,30 @@ func (e *Engine) Decide(req Request) Response {
 		Effect:      decision.Effect,
 		Obligations: decision.Obligations,
 		Matched:     decision.Matched,
-		Reason:      decision.Reasons[0],
+	}
+	if len(decision.Reasons) > 0 {
+		resp.Reason = decision.Reasons[0]
 	}
 	if len(reasons) > 0 {
-		resp.Effect = policy.Permit
+		resp.Effect = policy.Deny
 		resp.Obligations = nil
 		resp.Indeterminate = true
 		resp.Reason = joinReasons(reasons)
 	}
 	return resp
+}
+
+func (e *Engine) effective(source string, provided map[string]any) map[string]any {
+	out := make(map[string]any, len(provided))
+	for k, v := range provided {
+		out[k] = v
+	}
+	if e.Directory != nil {
+		for k, v := range e.Directory.Values(source) {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 func joinReasons(reasons []string) string {

@@ -16,6 +16,7 @@ type Node struct {
 	In       *In
 	Contains *Contains
 	Present  *Present
+	Invalid  bool
 }
 
 // Cmp is an ordered comparison between two references.
@@ -53,38 +54,44 @@ type Ref struct {
 func (n *Node) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return fmt.Errorf("condition node must be an object: %w", err)
+		n.Invalid = true
+		return nil
 	}
-	if len(raw) == 0 {
-		return fmt.Errorf("condition node is empty")
+	if len(raw) != 1 {
+		n.Invalid = true
+		return nil
 	}
 	for key, val := range raw {
 		switch key {
 		case "and":
 			var list []Node
 			if err := json.Unmarshal(val, &list); err != nil {
-				return fmt.Errorf("and: %w", err)
+				n.Invalid = true
+				return nil
 			}
 			n.And = list
 			n.Or, n.Not, n.Cmp, n.In, n.Contains, n.Present = nil, nil, nil, nil, nil, nil
 		case "or":
 			var list []Node
 			if err := json.Unmarshal(val, &list); err != nil {
-				return fmt.Errorf("or: %w", err)
+				n.Invalid = true
+				return nil
 			}
 			n.Or = list
 			n.And, n.Not, n.Cmp, n.In, n.Contains, n.Present = nil, nil, nil, nil, nil, nil
 		case "not":
 			var child Node
 			if err := json.Unmarshal(val, &child); err != nil {
-				return fmt.Errorf("not: %w", err)
+				n.Invalid = true
+				return nil
 			}
 			n.Not = &child
 			n.And, n.Or, n.Cmp, n.In, n.Contains, n.Present = nil, nil, nil, nil, nil, nil
 		case "cmp":
 			var c Cmp
 			if err := json.Unmarshal(val, &c); err != nil {
-				return fmt.Errorf("cmp: %w", err)
+				n.Invalid = true
+				return nil
 			}
 			n.Cmp = &c
 			n.And, n.Or, n.Not, n.In, n.Contains, n.Present = nil, nil, nil, nil, nil, nil
@@ -94,7 +101,8 @@ func (n *Node) UnmarshalJSON(data []byte) error {
 				Values []Ref  `json:"values"`
 			}
 			if err := json.Unmarshal(val, &raw); err != nil {
-				return fmt.Errorf("in: %w", err)
+				n.Invalid = true
+				return nil
 			}
 			n.In = &In{Path: raw.Path, Values: raw.Values}
 			n.And, n.Or, n.Not, n.Cmp, n.Contains, n.Present = nil, nil, nil, nil, nil, nil
@@ -104,7 +112,8 @@ func (n *Node) UnmarshalJSON(data []byte) error {
 				Value Ref    `json:"value"`
 			}
 			if err := json.Unmarshal(val, &raw); err != nil {
-				return fmt.Errorf("contains: %w", err)
+				n.Invalid = true
+				return nil
 			}
 			n.Contains = &Contains{Path: raw.Path, Value: raw.Value}
 			n.And, n.Or, n.Not, n.Cmp, n.In, n.Present = nil, nil, nil, nil, nil, nil
@@ -113,12 +122,14 @@ func (n *Node) UnmarshalJSON(data []byte) error {
 				Path string `json:"path"`
 			}
 			if err := json.Unmarshal(val, &raw); err != nil {
-				return fmt.Errorf("present: %w", err)
+				n.Invalid = true
+				return nil
 			}
 			n.Present = &Present{Path: raw.Path}
 			n.And, n.Or, n.Not, n.Cmp, n.In, n.Contains = nil, nil, nil, nil, nil, nil
 		default:
-			return fmt.Errorf("unknown condition node %q", key)
+			n.Invalid = true
+			return nil
 		}
 	}
 	return nil

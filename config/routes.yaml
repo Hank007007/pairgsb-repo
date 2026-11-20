@@ -1,0 +1,51 @@
+server:
+  host: 127.0.0.1
+  port: 8080
+  request_timeout_ms: 15000
+  headers_timeout_ms: 10000
+
+jwt:
+  secret: routeclaim-dev-secret
+  issuer: auth.internal
+
+introspection:
+  endpoint: http://127.0.0.1:9100/introspect
+  cache_ttl_ms: 30000
+  timeout_ms: 2000
+
+routes:
+  - path: /api/public
+    methods: [GET, POST]
+    auth: public
+    scopes: []
+    upstream: http://127.0.0.1:9001
+
+  - path: /api
+    methods: [GET, POST, PUT, PATCH, DELETE]
+    auth: jwt
+    scopes: [docs:read]
+    upstream: http://127.0.0.1:9000
+
+  - path: /api/admin
+    methods: [GET, POST, DELETE]
+    auth: introspect
+    scopes: [admin:write]
+    upstream: http://127.0.0.1:9002
+
+  - path: /reports
+    methods: [GET]
+    auth: introspect
+    scopes: [reports:read]
+    upstream: http://127.0.0.1:9003
+
+  - path: /events
+    methods: ["*"]
+    auth: public
+    scopes: []
+    upstream: http://127.0.0.1:9004
+
+  - path: /health
+    methods: [GET]
+    auth: public
+    scopes: []
+    upstream: http://127.0.0.1:9005

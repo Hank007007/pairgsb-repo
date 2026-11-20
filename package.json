@@ -1,0 +1,16 @@
+{
+  "name": "routeclaim",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Edge gateway that routes public traffic to internal HTTP services and normalizes caller identity.",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "license": "UNLICENSED"
+}

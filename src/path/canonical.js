@@ -7,12 +7,17 @@
 export function normalize(path) {
   if (typeof path !== 'string' || path.length === 0) return '/';
 
-  let result = path.startsWith('/') ? path : `/${path}`;
-  result = result.replace(/\/+/g, '/');
-  if (result.length > 1 && result.endsWith('/')) {
-    result = result.slice(0, -1);
+  const segments = [];
+  for (const segment of path.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') {
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
   }
-  return result || '/';
+
+  return segments.length === 0 ? '/' : `/${segments.join('/')}`;
 }
 
 /**
@@ -25,5 +30,6 @@ export function normalize(path) {
 export function isInside(ancestor, candidate) {
   const parent = normalize(ancestor);
   const child = normalize(candidate);
-  return child.startsWith(parent);
+  if (parent === '/') return true;
+  return child === parent || child.startsWith(`${parent}/`);
 }

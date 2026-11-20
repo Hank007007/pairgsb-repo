@@ -16,7 +16,7 @@ export function visibleChildren(store, userId, folderId) {
     .filter((node) => node.parentId === folderId)
     .filter((child) => {
       const childRole = effectiveRole(store, userId, child.id);
-      return childRole !== null || folderRole !== null;
+      return childRole !== null;
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 }

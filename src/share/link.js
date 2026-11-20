@@ -87,8 +87,11 @@ export function verifyLink(store, token, request = {}) {
   }
 
   const now = Date.now();
-  if (link.expiresAt !== null && link.expiresAt < now) {
-    return { ok: false, reason: 'expired', link };
+  if (link.expiresAt !== null) {
+    const expiresAt = Date.parse(link.expiresAt);
+    if (!Number.isFinite(expiresAt) || now >= expiresAt) {
+      return { ok: false, reason: 'expired', link };
+    }
   }
 
   if (link.passwordHash !== null) {
@@ -98,6 +101,10 @@ export function verifyLink(store, token, request = {}) {
     if (!passwordMatches(link, request.password)) {
       return { ok: false, reason: 'bad_password', link };
     }
+  }
+
+  if (!hasRole(store, link.issuedBy, link.nodeId, link.role)) {
+    return { ok: false, reason: 'issuer_revoked', link };
   }
 
   const targetPath = request.targetPath;

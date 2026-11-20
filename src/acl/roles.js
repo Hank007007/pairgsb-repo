@@ -1,23 +1,24 @@
-export const ROLES = ['owner', 'editor', 'commenter', 'viewer'];
+export const ROLES = ['viewer', 'commenter', 'editor', 'owner'];
 
 export function isValidRole(role) {
   return typeof role === 'string' && ROLES.includes(role);
 }
 
 /**
- * Numeric rank for a role: owner 3, editor 2, commenter 1, viewer 0.
+ * Numeric rank for a role: viewer 0, commenter 1, editor 2, owner 3.
  * Unknown roles rank below every valid role.
  */
 export function rankOf(role) {
   const index = ROLES.indexOf(role);
-  return index === -1 ? -1 : ROLES.length - 1 - index;
+  return index === -1 ? -1 : index;
 }
 
 /**
  * Whether the granted role covers the required role.
  */
 export function atLeast(granted, required) {
-  return granted >= required;
+  if (!isValidRole(granted) || !isValidRole(required)) return false;
+  return rankOf(granted) >= rankOf(required);
 }
 
 /**

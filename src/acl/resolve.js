@@ -26,13 +26,10 @@ export function effectiveRole(store, userId, nodeId) {
       (entry) => entry.nodeId === node.id && principalMatches(store, userId, entry.principal),
     );
 
-    let role = null;
-    for (const entry of level) {
-      if (entry.deny) continue;
-      role = maxRole([role, entry.role]);
+    if (level.length > 0) {
+      if (level.some((entry) => entry.deny)) return null;
+      return maxRole(level.map((entry) => entry.role));
     }
-
-    if (role !== null) return role;
 
     node = node.parentId === null ? null : getNode(store, node.parentId);
   }

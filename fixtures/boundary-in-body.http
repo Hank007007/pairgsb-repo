@@ -1,0 +1,9 @@
+--XyZ-boundary-42
+Content-Disposition: form-data; name="note"
+Content-Type: text/plain
+
+visible text --XyZ-boundary-42
+Content-Disposition: form-data; name="ghost"
+
+ghost body
+--XyZ-boundary-42--

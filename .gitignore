@@ -1,0 +1,37 @@
+# dependencies
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# build output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# test and coverage artifacts
+coverage/
+.nyc_output/
+*.lcov
+test-results/
+
+# caches
+.cache/
+.npm/
+.eslintcache
+
+# local environment
+.env
+.env.*
+!.env.example
+
+# editor and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# scratch files kept outside version control
+.build.prompt.txt
+*.tmp

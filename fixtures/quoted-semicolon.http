@@ -1,0 +1,6 @@
+--XyZ-boundary-42
+Content-Disposition: form-data; name="doc"; filename="a;b=c.txt"
+Content-Type: text/plain
+
+alpha
+--XyZ-boundary-42--

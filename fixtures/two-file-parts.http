@@ -1,0 +1,9 @@
+--XyZ-boundary-42
+Content-Disposition: form-data; name="a"; filename="a.bin"
+
+AAAA
+--XyZ-boundary-42
+Content-Disposition: form-data; name="b"; filename="b.bin"
+
+BBBBBB
+--XyZ-boundary-42--

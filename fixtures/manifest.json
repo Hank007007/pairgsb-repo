@@ -1,0 +1,128 @@
+{
+  "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+  "requests": [
+    {
+      "file": "simple-fields.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "two plain fields"
+    },
+    {
+      "file": "file-upload.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "one file part with a content type"
+    },
+    {
+      "file": "empty-field.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "a field with an empty body"
+    },
+    {
+      "file": "quoted-filename.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "quoted filename containing spaces and parentheses"
+    },
+    {
+      "file": "two-file-parts.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "two file parts in one request"
+    },
+    {
+      "file": "folded-disposition.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "Content-Disposition split across continuation lines"
+    },
+    {
+      "file": "quoted-semicolon.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "filename whose quoted value contains a semicolon and an equals sign"
+    },
+    {
+      "file": "extended-filename.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "RFC 5987 filename* with a percent-encoded UTF-8 name"
+    },
+    {
+      "file": "percent-in-filename.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "plain filename carrying percent escapes"
+    },
+    {
+      "file": "traversal-filename.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "filename attempting to climb out with backslashes"
+    },
+    {
+      "file": "absolute-filename.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "absolute POSIX path in the filename"
+    },
+    {
+      "file": "drive-filename.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "Windows drive-qualified path in the filename"
+    },
+    {
+      "file": "nul-filename.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "filename carrying a NUL byte before the extension"
+    },
+    {
+      "file": "reserved-filename.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "Windows reserved device name"
+    },
+    {
+      "file": "nested-dotdot-filename.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "repeated dot segments with doubled separators"
+    },
+    {
+      "file": "boundary-in-body.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "part body embeds the boundary substring without a preceding CRLF"
+    },
+    {
+      "file": "trailing-epilogue.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "closing delimiter followed by epilogue text"
+    },
+    {
+      "file": "many-parts.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "forty empty parts against a part budget of eight",
+      "limits": {
+        "maxParts": 8
+      }
+    },
+    {
+      "file": "oversized-header.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "one part whose header block is 60 KiB against a 4 KiB header budget",
+      "limits": {
+        "maxHeaderBytes": 4096
+      }
+    },
+    {
+      "file": "oversized-part.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "one 300 KiB part against a 64 KiB per-part budget",
+      "limits": {
+        "maxPartBytes": 65536
+      }
+    },
+    {
+      "file": "oversized-total.http",
+      "contentType": "multipart/form-data; boundary=XyZ-boundary-42",
+      "description": "five parts totalling more than the configured request budget",
+      "limits": {
+        "maxTotalBytes": 4096,
+        "maxPartBytes": 4096
+      }
+    },
+    {
+      "file": "invalid-boundary.http",
+      "contentType": "multipart/form-data; boundary=LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+      "description": "boundary longer than seventy characters"
+    }
+  ]
+}

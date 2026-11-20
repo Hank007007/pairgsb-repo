@@ -1,0 +1,8 @@
+--XyZ-boundary-42
+Content-Disposition: form-data;
+ name="avatar";
+ filename="portrait.jpg"
+Content-Type: image/jpeg
+
+fake-jpeg-bytes
+--XyZ-boundary-42--

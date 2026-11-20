@@ -1,0 +1,8 @@
+--XyZ-boundary-42
+Content-Disposition: form-data; name="doc"; filename="notes.txt"
+Content-Type: text/plain
+
+line one
+line two
+
+--XyZ-boundary-42--

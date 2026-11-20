@@ -1,0 +1,22 @@
+# Build output
+/bin/
+/dist/
+/patchdemo
+/patchdemo.exe
+*.exe
+*.test
+*.out
+
+# Go workspace and tooling caches
+/vendor/
+.idea/
+.vscode/
+*.swp
+.DS_Store
+coverage.out
+coverage.html
+
+# Local environment
+.env
+.env.local
+.build.prompt.txt

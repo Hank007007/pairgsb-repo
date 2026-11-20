@@ -1,0 +1,13 @@
+{
+  "name": "sharefence",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ACL and external share-link authorization layer for an internal file collaboration backend",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

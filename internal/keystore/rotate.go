@@ -33,71 +33,83 @@ func (s *Sealer) RotateKEK(records []*Record) (Rotation, error) {
 	}
 
 	res := Rotation{TargetVersion: target}
-	for _, rec := range records {
-		if rec == nil {
-			return res, ErrInvalidRecord
+	staged := make([]*Record, len(records))
+	for i, rec := range records {
+		if err := validateRecordShape(rec); err != nil {
+			return Rotation{TargetVersion: target}, fmt.Errorf("%w: record %d: %w", ErrRotationFailed, i, err)
+		}
+		if rec.Alg != AlgAESGCM {
+			return Rotation{TargetVersion: target}, fmt.Errorf("%w: record %d: %w", ErrRotationFailed, i, fmt.Errorf("%w: %q", ErrUnsupportedAlgorithm, rec.Alg))
 		}
 		if rec.KeyVersion == target {
 			res.Skipped++
 			continue
 		}
-		if err := s.rewrap(rec, target, targetAEAD); err != nil {
-			res.Rotated = len(records)
-			return res, nil
+		rotated, err := s.rewrapCopy(rec, target, targetAEAD)
+		if err != nil {
+			return Rotation{TargetVersion: target}, fmt.Errorf("%w: record %d: %w", ErrRotationFailed, i, err)
 		}
+		staged[i] = rotated
 		res.Rotated++
+	}
+
+	// Nothing has been mutated yet. Commit the staged copies only after every
+	// record in the batch has been successfully re-wrapped.
+	for i, rotated := range staged {
+		if rotated != nil {
+			*records[i] = *rotated
+		}
 	}
 	return res, nil
 }
 
-// rewrap moves a single record onto target. The DEK is unwrapped with the
-// record's current KEK, the payload is re-sealed under the target header,
-// and the DEK is wrapped again with the target KEK.
-func (s *Sealer) rewrap(rec *Record, target int, targetAEAD cipher.AEAD) error {
+// rewrapCopy returns a copy of rec moved onto target. The input record is not
+// modified. The DEK is unwrapped with the record's current KEK, the payload is
+// re-sealed under the target header, and the DEK is wrapped with the target
+// KEK.
+func (s *Sealer) rewrapCopy(rec *Record, target int, targetAEAD cipher.AEAD) (*Record, error) {
 	wrapVersion, wrapNonce, wrappedDEK, err := decodeWrappedDEK(rec.WrappedDEK, 12, 16)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	oldKEK, err := s.ring.KEK(wrapVersion)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	oldAEAD, err := newAEAD(oldKEK)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	dek, err := oldAEAD.Open(nil, wrapNonce, wrappedDEK, wrapAAD(rec.ID))
 	if err != nil {
-		return fmt.Errorf("%w: unwrap dek", ErrAuthentication)
+		return nil, fmt.Errorf("%w: unwrap dek", ErrAuthentication)
 	}
 
 	payloadAEAD, err := newAEAD(dek)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	plaintext, err := payloadAEAD.Open(nil, rec.Nonce, rec.Ciphertext, BuildAAD(rec))
+	plaintext, err := openPayload(payloadAEAD, rec, wrapVersion)
 	if err != nil {
-		return fmt.Errorf("%w: decrypt payload", ErrAuthentication)
+		return nil, err
 	}
 
-	newVersion := *rec
-	newVersion.KeyVersion = target
+	out := *rec
+	out.KeyVersion = target
 
 	newNonce := make([]byte, payloadAEAD.NonceSize())
 	if _, err := rand.Read(newNonce); err != nil {
-		return fmt.Errorf("kekseal: generate nonce: %w", err)
+		return nil, fmt.Errorf("kekseal: generate nonce: %w", err)
 	}
-	ciphertext := payloadAEAD.Seal(nil, newNonce, plaintext, BuildAAD(&newVersion))
+	out.Nonce = newNonce
+	out.Ciphertext = payloadAEAD.Seal(nil, newNonce, plaintext, BuildAAD(&out))
 
 	newWrapNonce := make([]byte, targetAEAD.NonceSize())
 	if _, err := rand.Read(newWrapNonce); err != nil {
-		return fmt.Errorf("kekseal: generate wrap nonce: %w", err)
+		return nil, fmt.Errorf("kekseal: generate wrap nonce: %w", err)
 	}
-	wrapped := targetAEAD.Seal(nil, newWrapNonce, dek, wrapAAD(newVersion.ID))
+	out.WrappedDEK = encodeWrappedDEK(target, newWrapNonce,
+		targetAEAD.Seal(nil, newWrapNonce, dek, wrapAAD(out.ID)))
 
-	rec.KeyVersion = newVersion.KeyVersion
-	rec.Nonce = newNonce
-	rec.Ciphertext = ciphertext
-	rec.WrappedDEK = encodeWrappedDEK(target, newWrapNonce, wrapped)
-	return nil
+	return &out, nil
 }

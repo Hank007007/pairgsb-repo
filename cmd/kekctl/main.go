@@ -191,25 +191,98 @@ func cmdRotate(args []string) error {
 	}
 
 	records := make([]*keystore.Record, 0, len(paths))
+	originalVersions := make([]int, 0, len(paths))
 	for _, p := range paths {
 		rec, err := keystore.ReadRecord(p)
 		if err != nil {
 			return fmt.Errorf("%s: %w", p, err)
 		}
 		records = append(records, rec)
+		originalVersions = append(originalVersions, rec.KeyVersion)
 	}
 
 	res, err := keystore.NewSealer(ring).RotateKEK(records)
 	if err != nil {
 		return err
 	}
+
+	var writePaths []string
+	var writeRecords []*keystore.Record
 	for i, p := range paths {
-		if err := keystore.WriteRecord(p, records[i]); err != nil {
-			return fmt.Errorf("%s: %w", p, err)
+		if originalVersions[i] == res.TargetVersion {
+			continue
 		}
+		writePaths = append(writePaths, p)
+		writeRecords = append(writeRecords, records[i])
+	}
+	if err := writeRecordsAtomic(writePaths, writeRecords); err != nil {
+		return err
 	}
 	fmt.Printf("rotated %d record(s) to version %d, skipped %d\n",
 		res.Rotated, res.TargetVersion, res.Skipped)
+	return nil
+}
+
+// writeRecordsAtomic stages every record before replacing any destination, so
+// a failure while preparing the batch leaves every original file in place.
+func writeRecordsAtomic(paths []string, records []*keystore.Record) error {
+	type stagedFile struct {
+		tmp string
+		dst string
+	}
+	staged := make([]stagedFile, 0, len(paths))
+	cleanup := func() {
+		for _, f := range staged {
+			_ = os.Remove(f.tmp)
+		}
+	}
+
+	for i, path := range paths {
+		data, err := json.MarshalIndent(records[i], "", "  ")
+		if err != nil {
+			cleanup()
+			return err
+		}
+		data = append(data, '\n')
+
+		tmp, err := os.CreateTemp(filepath.Dir(path), ".kekseal-rotate-*.tmp")
+		if err != nil {
+			cleanup()
+			return err
+		}
+		tmpName := tmp.Name()
+		if _, err := tmp.Write(data); err != nil {
+			tmp.Close()
+			_ = os.Remove(tmpName)
+			cleanup()
+			return err
+		}
+		if err := tmp.Chmod(0o600); err != nil {
+			tmp.Close()
+			_ = os.Remove(tmpName)
+			cleanup()
+			return err
+		}
+		if err := tmp.Sync(); err != nil {
+			tmp.Close()
+			_ = os.Remove(tmpName)
+			cleanup()
+			return err
+		}
+		if err := tmp.Close(); err != nil {
+			_ = os.Remove(tmpName)
+			cleanup()
+			return err
+		}
+		staged = append(staged, stagedFile{tmp: tmpName, dst: path})
+	}
+
+	for _, f := range staged {
+		if err := os.Rename(f.tmp, f.dst); err != nil {
+			cleanup()
+			return fmt.Errorf("%s: %w", f.dst, err)
+		}
+	}
 	return nil
 }
 

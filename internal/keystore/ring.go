@@ -64,10 +64,15 @@ func ParseRing(data []byte) (*Ring, error) {
 		ring.GracePeriod = d
 	}
 
+	seen := make(map[int]struct{}, len(raw.Versions))
 	for _, rv := range raw.Versions {
 		if rv.Version <= 0 {
 			return nil, fmt.Errorf("%w: invalid version %d", ErrInvalidRing, rv.Version)
 		}
+		if _, duplicate := seen[rv.Version]; duplicate {
+			return nil, fmt.Errorf("%w: version %d", ErrDuplicateVersion, rv.Version)
+		}
+		seen[rv.Version] = struct{}{}
 		kek, err := base64.StdEncoding.DecodeString(rv.KEK)
 		if err != nil {
 			return nil, fmt.Errorf("%w: version %d: bad kek encoding", ErrInvalidRing, rv.Version)
@@ -90,17 +95,7 @@ func ParseRing(data []byte) (*Ring, error) {
 			}
 			kv.RetiredAt = &t
 		}
-		replaced := false
-		for i := range ring.Versions {
-			if ring.Versions[i].Version == kv.Version {
-				ring.Versions[i] = kv
-				replaced = true
-				break
-			}
-		}
-		if !replaced {
-			ring.Versions = append(ring.Versions, kv)
-		}
+		ring.Versions = append(ring.Versions, kv)
 	}
 	sort.Slice(ring.Versions, func(i, j int) bool {
 		return ring.Versions[i].Version < ring.Versions[j].Version
@@ -119,12 +114,18 @@ func (r *Ring) find(version int) (*KeyVersion, bool) {
 
 // KEK returns the key material for version.
 func (r *Ring) KEK(version int) ([]byte, error) {
-	if r == nil {
+	if r == nil || len(r.Versions) == 0 {
 		return nil, ErrEmptyRing
 	}
 	kv, ok := r.find(version)
 	if !ok {
 		return nil, fmt.Errorf("%w: %d", ErrUnknownVersion, version)
+	}
+	if kv.RetiredAt != nil {
+		expiresAt := kv.RetiredAt.Add(r.GracePeriod)
+		if !time.Now().Before(expiresAt) {
+			return nil, fmt.Errorf("%w: %d", ErrVersionRetired, version)
+		}
 	}
 	return kv.KEK, nil
 }
@@ -135,10 +136,18 @@ func (r *Ring) ActiveKEK() (int, []byte, error) {
 	if r == nil || len(r.Versions) == 0 {
 		return 0, nil, ErrEmptyRing
 	}
-	for i := len(r.Versions) - 1; i >= 0; i-- {
-		if r.Versions[i].RetiredAt == nil {
-			return r.Versions[i].Version, r.Versions[i].KEK, nil
+	var active *KeyVersion
+	for i := range r.Versions {
+		kv := &r.Versions[i]
+		if kv.RetiredAt != nil {
+			continue
 		}
+		if active == nil || kv.Version > active.Version {
+			active = kv
+		}
+	}
+	if active != nil {
+		return active.Version, active.KEK, nil
 	}
 	return 0, nil, ErrNoActiveVersion
 }
@@ -148,7 +157,13 @@ func (r *Ring) LatestVersion() int {
 	if r == nil || len(r.Versions) == 0 {
 		return 0
 	}
-	return r.Versions[len(r.Versions)-1].Version
+	latest := r.Versions[0].Version
+	for _, kv := range r.Versions[1:] {
+		if kv.Version > latest {
+			latest = kv.Version
+		}
+	}
+	return latest
 }
 
 // Clone returns a deep copy of the ring.

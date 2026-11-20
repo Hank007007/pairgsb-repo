@@ -115,15 +115,10 @@ func (s *Sealer) Open(rec *Record) ([]byte, error) {
 	if err := validateRecordShape(rec); err != nil {
 		return nil, err
 	}
-
-	switch rec.Alg {
-	case "plain":
-		return append([]byte(nil), rec.Ciphertext...), nil
-	case AlgAESGCM:
-		return s.openSealed(rec)
-	default:
+	if rec.Alg != AlgAESGCM {
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedAlgorithm, rec.Alg)
 	}
+	return s.openSealed(rec)
 }
 
 func (s *Sealer) openSealed(rec *Record) ([]byte, error) {
@@ -151,11 +146,24 @@ func (s *Sealer) openSealed(rec *Record) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return openPayload(payloadAEAD, rec, wrapVersion)
+}
+
+// openPayload decrypts rec.Ciphertext. Records sealed before the header was
+// bound into the AAD are accepted only when their header still matches the
+// wrap version that unwrapped their DEK.
+func openPayload(payloadAEAD cipher.AEAD, rec *Record, wrapVersion int) ([]byte, error) {
 	plaintext, err := payloadAEAD.Open(nil, rec.Nonce, rec.Ciphertext, BuildAAD(rec))
-	if err != nil {
-		return nil, fmt.Errorf("%w: decrypt payload", ErrAuthentication)
+	if err == nil {
+		return plaintext, nil
 	}
-	return plaintext, nil
+	if rec.KeyVersion == wrapVersion {
+		plaintext, legacyErr := payloadAEAD.Open(nil, rec.Nonce, rec.Ciphertext, legacyAAD(rec))
+		if legacyErr == nil {
+			return plaintext, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: decrypt payload", ErrAuthentication)
 }
 
 // wrapAAD returns the additional data used when sealing a DEK to its KEK.

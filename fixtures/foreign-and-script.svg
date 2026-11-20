@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">
+  <foreignObject x="0" y="0" width="64" height="64">
+    <div xmlns="http://www.w3.org/1999/xhtml">
+      <iframe src="javascript:alert(1)"></iframe>
+      <img src="x" onerror="alert(2)"/>
+    </div>
+  </foreignObject>
+  <script>alert('paired')</script>
+  <script/>
+  <rect width="64" height="64" fill="#abc"/>
+</svg>

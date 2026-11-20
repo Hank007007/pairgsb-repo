@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet href="https://evil.example.com/theme.css" type="text/css"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd" [
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+  <!ENTITY probe "entity-expanded">
+]>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">
+  <title>&probe;</title>
+  <text x="4" y="20">&xxe;</text>
+  <rect width="64" height="64" fill="#ccc"/>
+</svg>

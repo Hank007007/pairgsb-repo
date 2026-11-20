@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64">
+  <image href="JaVaScRiPt:alert(1)" width="8" height="8"/>
+  <image href="  javascript:alert(2)" width="8" height="8"/>
+  <image href="java	script:alert(3)" width="8" height="8"/>
+  <image href="java&#x0A;script:alert(4)" width="8" height="8"/>
+  <image href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==" width="8" height="8"/>
+  <image xlink:href="vbscript:msgbox(1)" width="8" height="8"/>
+  <image href="https://cdn.example.com/ok.png" width="8" height="8"/>
+  <a href="javascript:alert(5)"><text x="4" y="60">tap</text></a>
+</svg>

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">
+  <rect width="64" height="64" fill="#eee" data-caption="before > after" onclick="alert(1)"/>
+  <text x="4" y="20" data-label="a>b" onmouseover="alert(2)">hi</text>
+  <circle cx="20" cy="40" r="8" fill="red"/>
+</svg>

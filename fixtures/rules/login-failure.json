@@ -1,0 +1,5 @@
+{
+  "name": "login-failure",
+  "tenant": "acme",
+  "expression": "message matches \"(?i)login failed\" and severity != \"low\""
+}

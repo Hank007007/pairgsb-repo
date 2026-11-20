@@ -1,0 +1,18 @@
+{
+  "event": {
+    "id": "evt-1001",
+    "time": "2026-11-21T03:00:00Z"
+  },
+  "action": "login",
+  "severity": "high",
+  "message": "LOGIN FAILED for alice",
+  "source": {
+    "ip": "10.1.2.3",
+    "port": 443,
+    "host": "edge-1"
+  },
+  "actor": {
+    "user": "alice",
+    "role": "admin"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "rulemill",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sandboxed expression evaluator for tenant-authored alert rules",
+  "main": "src/compile.js",
+  "scripts": {
+    "test": "node --test",
+    "rules": "node bin/run.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED"
+}

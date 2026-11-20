@@ -1,0 +1,18 @@
+{
+  "event": {
+    "id": "evt-1002",
+    "time": "2026-11-21T03:05:00Z"
+  },
+  "action": "login",
+  "severity": "high",
+  "message": "login failed for bob",
+  "source": {
+    "ip": "192.168.1.9",
+    "port": 22,
+    "host": "bastion"
+  },
+  "actor": {
+    "user": "bob",
+    "role": "operator"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "alice-only",
+  "tenant": "acme",
+  "expression": "actor.user == \"alice\" and event.action == \"login\""
+}

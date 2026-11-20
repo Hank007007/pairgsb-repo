@@ -1,0 +1,32 @@
+# Build output
+/bin/
+/dist/
+/build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go workspace metadata
+go.work
+go.work.sum
+
+# Local caches
+/.cache/
+/.tmp/
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local environment files
+.env
+.env.*
+/.build.prompt.txt

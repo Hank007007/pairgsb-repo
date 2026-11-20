@@ -1,0 +1,14 @@
+{
+  "default": {
+    "billing/api_key": "kv-default-billing-key",
+    "billing/dsn": "postgres://billing@db.internal/billing",
+    "billing/template": "invoice-${SERVICE_NAME}-v2",
+    "shared/session_token": "kv-default-session-token"
+  },
+  "staging": {
+    "billing/api_key": "kv-staging-billing-key",
+    "billing/dsn": "postgres://billing@db.staging.internal/billing",
+    "billing/template": "invoice-staging-v2",
+    "shared/session_token": "kv-staging-session-token"
+  }
+}

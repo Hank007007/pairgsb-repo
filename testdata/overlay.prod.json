@@ -1,0 +1,8 @@
+{
+  "db.host": "db.prod.internal",
+  "db.dsn": "secret://kv/billing/dsn",
+  "billing.api_key": "secret://kv/billing/api_key",
+  "billing.publishable_key": "pk-live-789",
+  "features": ["metrics", "tracing", "audit"],
+  "log.level": "warn"
+}

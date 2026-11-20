@@ -1,0 +1,8 @@
+{
+  "db.host": "db.staging.internal",
+  "db.dsn": "secret://kv/billing/dsn",
+  "billing.api_key": "secret://kv/shared/session_token",
+  "billing.publishable_key": "pk-test-456",
+  "features": ["metrics", "debug"],
+  "log.level": "debug"
+}

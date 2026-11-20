@@ -1,0 +1,10 @@
+{
+  "service.name": "${SERVICE_NAME}",
+  "service.region": "us-east-1",
+  "db.host": "db.internal",
+  "db.password": "secret://kv/billing/api_key",
+  "billing.api_key": "secret://kv/billing/api_key",
+  "billing.publishable_key": "pk-live-123",
+  "features": ["metrics", "tracing"],
+  "log.level": "info"
+}

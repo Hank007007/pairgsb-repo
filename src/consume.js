@@ -23,13 +23,14 @@ function normalizeContext(ctx) {
   };
 }
 
-function auditRejection(context, event, details) {
+function auditRejection(context, details) {
   if (context.audit && typeof context.audit.record === 'function') {
     context.audit.record({
-      event,
+      event: 'token.rejected',
       id: details.id ?? null,
       subject: details.subject ?? null,
       purpose: details.purpose ?? null,
+      reason: details.reason ?? null,
       token: details.token,
     });
   }
@@ -48,22 +49,24 @@ export async function consume(ctx, input = {}) {
   if (record === null) {
     const used = await context.store.wasConsumed(token);
     if (used) {
-      auditRejection(context, 'token.rejected', {
+      auditRejection(context, {
         token,
         id: null,
         subject: null,
         purpose: input.purpose ?? null,
+        reason: 'already-used',
       });
       throw new TokenError(
         ERROR_CODES.TOKEN_ALREADY_USED,
         'token has already been used',
       );
     }
-    auditRejection(context, 'token.rejected', {
+    auditRejection(context, {
       token,
       id: null,
       subject: input.subject ?? null,
       purpose: input.purpose ?? null,
+      reason: 'unknown',
     });
     throw new TokenError(ERROR_CODES.TOKEN_UNKNOWN, 'token is not recognised');
   }
@@ -73,35 +76,100 @@ export async function consume(ctx, input = {}) {
     try {
       await context.store.remove(token);
     } catch {}
-    auditRejection(context, 'token.rejected', {
+    auditRejection(context, {
       token,
       id: record.id,
       subject: record.subject,
       purpose: record.purpose,
+      reason: 'expired',
     });
     throw new TokenError(ERROR_CODES.TOKEN_EXPIRED, 'token has expired');
   }
 
   if (!matches(record.digest, digest(token, context.pepper))) {
-    auditRejection(context, 'token.rejected', {
+    auditRejection(context, {
       token,
       id: record.id,
       subject: record.subject,
       purpose: record.purpose,
+      reason: 'unknown',
     });
     throw new TokenError(ERROR_CODES.TOKEN_UNKNOWN, 'token is not recognised');
   }
 
+  if (input.subject !== undefined && input.subject !== null) {
+    const presented =
+      typeof input.subject === 'string' ? input.subject.trim() : null;
+    if (presented !== record.subject) {
+      auditRejection(context, {
+        token,
+        id: record.id,
+        subject: record.subject,
+        purpose: record.purpose,
+        reason: 'subject-mismatch',
+      });
+      throw new TokenError(
+        ERROR_CODES.TOKEN_SUBJECT_MISMATCH,
+        'token is bound to a different subject',
+      );
+    }
+  }
+
+  if (
+    input.purpose !== undefined &&
+    input.purpose !== null &&
+    input.purpose !== record.purpose
+  ) {
+    auditRejection(context, {
+      token,
+      id: record.id,
+      subject: record.subject,
+      purpose: record.purpose,
+      reason: 'purpose-mismatch',
+    });
+    throw new TokenError(
+      ERROR_CODES.TOKEN_PURPOSE_MISMATCH,
+      'token is bound to a different purpose',
+    );
+  }
+
+  let removed;
   try {
-    await context.store.remove(token);
-  } catch {}
+    removed = await context.store.remove(token);
+  } catch {
+    auditRejection(context, {
+      token,
+      id: record.id,
+      subject: record.subject,
+      purpose: record.purpose,
+      reason: 'storage-failure',
+    });
+    throw new TokenError(
+      ERROR_CODES.STORAGE_FAILURE,
+      'token could not be consumed because storage failed',
+    );
+  }
+
+  if (!removed) {
+    auditRejection(context, {
+      token,
+      id: record.id,
+      subject: record.subject,
+      purpose: record.purpose,
+      reason: 'already-used',
+    });
+    throw new TokenError(
+      ERROR_CODES.TOKEN_ALREADY_USED,
+      'token has already been used',
+    );
+  }
 
   if (context.audit && typeof context.audit.record === 'function') {
     context.audit.record({
       event: 'token.consumed',
       id: record.id,
       subject: record.subject,
-      purpose: input.purpose ?? record.purpose,
+      purpose: record.purpose,
       token,
     });
   }

@@ -1,5 +1,16 @@
+import crypto from 'node:crypto';
+
+const FINGERPRINT_LENGTH = 12;
+
 export function fingerprint(token) {
-  return String(token ?? '').slice(0, 8);
+  if (typeof token !== 'string' || token.length === 0) {
+    return null;
+  }
+  return crypto
+    .createHash('sha256')
+    .update(token, 'utf8')
+    .digest('hex')
+    .slice(0, FINGERPRINT_LENGTH);
 }
 
 export class AuditLog {
@@ -16,6 +27,7 @@ export class AuditLog {
       id: event.id ?? null,
       subject: event.subject ?? null,
       purpose: event.purpose ?? null,
+      reason: event.reason ?? null,
       fingerprint: fingerprint(event.token),
     };
 

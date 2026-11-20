@@ -1,13 +1,16 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
+import { digest } from './token.js';
 import { toMillis } from './time.js';
 
 /**
  * Storage used by the issue/consume flows.
  *
- * Callers hand the store the token that was presented to them; the store files
- * each record under the key returned by `#keyFor`.
+ * Callers hand the store the token that was presented to them; the store
+ * derives a key from the token and the service pepper (HMAC digest) and files
+ * each record under that derived key. The plaintext token never appears in
+ * any structure the store owns.
  *
  * `remove` returns true when a record was present and false otherwise. It is
  * the storage primitive; deciding whether a removal is the one that wins a
@@ -33,12 +36,15 @@ export class MemoryStore {
   #consumed = new Set();
   #ready = Promise.resolve();
 
-  constructor({ pepper = null } = {}) {
+  constructor({ pepper } = {}) {
+    if (typeof pepper !== 'string' || pepper.length === 0) {
+      throw new TypeError('MemoryStore requires a non-empty pepper');
+    }
     this.pepper = pepper;
   }
 
   #keyFor(token) {
-    return token;
+    return digest(token, this.pepper);
   }
 
   async put(token, record) {
@@ -105,10 +111,14 @@ export class MemoryStore {
 export class FileStore {
   #loading = null;
   #state = null;
+  #queue = Promise.resolve();
 
-  constructor({ file, pepper = null, fs = fsp } = {}) {
+  constructor({ file, pepper, fs = fsp } = {}) {
     if (typeof file !== 'string' || file.length === 0) {
       throw new TypeError('FileStore requires a file path');
+    }
+    if (typeof pepper !== 'string' || pepper.length === 0) {
+      throw new TypeError('FileStore requires a non-empty pepper');
     }
     this.file = path.resolve(file);
     this.pepper = pepper;
@@ -116,7 +126,13 @@ export class FileStore {
   }
 
   #keyFor(token) {
-    return token;
+    return digest(token, this.pepper);
+  }
+
+  #enqueue(task) {
+    const result = this.#queue.then(() => task());
+    this.#queue = result.catch(() => {});
+    return result;
   }
 
   #ensureLoaded() {
@@ -164,10 +180,27 @@ export class FileStore {
   }
 
   async put(token, record) {
-    const state = await this.#ensureLoaded();
-    state.records[this.#keyFor(token)] = structuredClone(record);
-    await this.#flush();
-    return true;
+    return this.#enqueue(async () => {
+      const state = await this.#ensureLoaded();
+      const key = this.#keyFor(token);
+      const hadPrevious = Object.prototype.hasOwnProperty.call(
+        state.records,
+        key,
+      );
+      const previous = state.records[key];
+      state.records[key] = structuredClone(record);
+      try {
+        await this.#flush();
+      } catch (error) {
+        if (hadPrevious) {
+          state.records[key] = previous;
+        } else {
+          delete state.records[key];
+        }
+        throw error;
+      }
+      return true;
+    });
   }
 
   async findByToken(token) {
@@ -177,17 +210,29 @@ export class FileStore {
   }
 
   async remove(token) {
-    const state = await this.#ensureLoaded();
-    const key = this.#keyFor(token);
-    if (!Object.prototype.hasOwnProperty.call(state.records, key)) {
-      return false;
-    }
-    delete state.records[key];
-    if (!state.consumed.includes(key)) {
-      state.consumed.push(key);
-    }
-    await this.#flush();
-    return true;
+    return this.#enqueue(async () => {
+      const state = await this.#ensureLoaded();
+      const key = this.#keyFor(token);
+      if (!Object.prototype.hasOwnProperty.call(state.records, key)) {
+        return false;
+      }
+      const record = state.records[key];
+      const wasListed = state.consumed.includes(key);
+      delete state.records[key];
+      if (!wasListed) {
+        state.consumed.push(key);
+      }
+      try {
+        await this.#flush();
+      } catch (error) {
+        state.records[key] = record;
+        if (!wasListed) {
+          state.consumed.pop();
+        }
+        throw error;
+      }
+      return true;
+    });
   }
 
   async wasConsumed(token) {
@@ -196,19 +241,28 @@ export class FileStore {
   }
 
   async pruneExpired(now) {
-    const state = await this.#ensureLoaded();
-    const cutoff = toMillis(now);
-    let removed = 0;
-    for (const [key, record] of Object.entries(state.records)) {
-      if (toMillis(record.expiresAt) <= cutoff) {
-        delete state.records[key];
-        removed += 1;
+    return this.#enqueue(async () => {
+      const state = await this.#ensureLoaded();
+      const cutoff = toMillis(now);
+      const removed = [];
+      for (const [key, record] of Object.entries(state.records)) {
+        if (toMillis(record.expiresAt) <= cutoff) {
+          removed.push([key, record]);
+          delete state.records[key];
+        }
       }
-    }
-    if (removed > 0) {
-      await this.#flush();
-    }
-    return removed;
+      if (removed.length > 0) {
+        try {
+          await this.#flush();
+        } catch (error) {
+          for (const [key, record] of removed) {
+            state.records[key] = record;
+          }
+          throw error;
+        }
+      }
+      return removed.length;
+    });
   }
 
   async size() {

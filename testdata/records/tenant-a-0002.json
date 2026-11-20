@@ -1,0 +1,9 @@
+{
+  "id": "doc-0002",
+  "tenant": "acme",
+  "key_version": 1,
+  "alg": "aes-gcm",
+  "nonce": "EbavCuHijQ1JasGe",
+  "wrapped_dek": "AAAAATkeV+qhPMiPrTskIcyqUS+XICuE7extXPUoFiYoGbEkmMAkWfjF/+Br+GhZ/Sowkx3GIIbMA6/b20ZvKA==",
+  "ciphertext": "20Eoi4cgbusrUOsE8kVrSIbCT+a7Fj+BSQ=="
+}

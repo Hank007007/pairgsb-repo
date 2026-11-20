@@ -1,0 +1,9 @@
+{
+  "id": "doc-0003",
+  "tenant": "globex",
+  "key_version": 1,
+  "alg": "aes-gcm",
+  "nonce": "yyqwvEysW0d/f31N",
+  "wrapped_dek": "AAAAAWqzOhze+KmaCg/JoKJTNBtsVcHoz4NhLsx+bzUpoKFBgnjvEqA8TJTp5WbkSk8ciEPhGbNrdpnkmuMlSw==",
+  "ciphertext": "5bJXcrnk5Bin+dLcwD4mEF9NV3AgJ09w7TZh+w=="
+}

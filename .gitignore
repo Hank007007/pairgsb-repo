@@ -1,0 +1,16 @@
+# Build artifacts
+/kekctl
+/kekctl.exe
+/bin/
+/dist/
+
+# Test and coverage output
+*.test
+*.out
+coverage.*
+
+# Local workspace files
+.DS_Store
+Thumbs.db
+*.log
+.build.prompt.txt

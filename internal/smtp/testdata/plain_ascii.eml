@@ -1,0 +1,11 @@
+From: Notifications <notify@example.com>
+To: alice@example.com
+Subject: Your order has shipped
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Hello Alice,
+
+Your order #1042 is on its way.
+

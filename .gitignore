@@ -1,0 +1,33 @@
+# 构建产物与缓存
+
+# 编译输出
+/bin/
+/dist/
+headlace
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# 覆盖率与性能剖析
+*.prof
+coverage.txt
+coverage.html
+
+# Go 工作区与依赖缓存
+/vendor/
+go.work
+go.work.sum
+
+# 编辑器与系统
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 本地任务说明，不随仓库分发
+.build.prompt.txt

@@ -10,7 +10,6 @@ from .clock import Clock
 from .leases import (
     Lease,
     LeaseExpiredError,
-    LeaseStateError,
     LeaseStore,
 )
 from .policy import PolicyStore, resolve_ttl
@@ -64,10 +63,12 @@ class Broker:
         if policy.reuse:
             cached = self._cache.get(key)
             if cached is not None:
-                if cached.is_live and not cached.is_expired(self._clock.now()):
-                    self._store.mark_active(cached.lease_id)
-                    return cached
-                self._store.expire(cached.lease_id)
+                current = self._store.refresh(cached.lease_id)
+                if current.is_live:
+                    self._store.mark_active(current.lease_id)
+                    active = current.snapshot()
+                    self._cache.put(key, active)
+                    return active
                 self._cache.drop(key)
 
         seconds = resolve_ttl(policy, ttl=ttl, ttl_seconds=ttl_seconds)
@@ -94,18 +95,22 @@ class Broker:
 
         lease = self._store.get(lease_id)
         if not lease.is_live:
-            raise LeaseStateError(
-                f"cannot renew lease {lease_id!r} in state {lease.state.value!r}"
-            )
+            return lease.snapshot()
         now = self._clock.now()
+        if now >= lease.absolute_expires_at:
+            self._store.expire(lease_id)
+            raise LeaseExpiredError(
+                f"lease {lease_id!r} has reached its absolute expiry"
+            )
         if now >= lease.expires_at:
             self._store.expire(lease_id)
             raise LeaseExpiredError(f"lease {lease_id!r} has expired")
 
         policy = self._policies.get(lease.role)
-        renewed = self._store.renew(
-            lease_id, now + timedelta(seconds=policy.soft_ttl)
-        )
+        target = now + timedelta(seconds=policy.soft_ttl)
+        if target > lease.absolute_expires_at:
+            target = lease.absolute_expires_at
+        renewed = self._store.renew(lease_id, target)
         return renewed.snapshot()
 
     def revoke(self, subject: str, role: str) -> list[Lease]:

@@ -9,7 +9,7 @@ from enum import Enum
 from itertools import count
 from typing import TYPE_CHECKING, Iterable
 
-from .backend import BackendError, Credential, CredentialBackend, Revoke
+from .backend import Credential, CredentialBackend, Revoke
 from .clock import Clock
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -152,13 +152,24 @@ class LeaseStore:
     def renew(self, lease_id: str, expires_at: datetime) -> Lease:
         lease = self.get(lease_id)
         if not lease.is_live:
-            raise LeaseStateError(
-                f"cannot renew lease {lease_id!r} in state {lease.state.value!r}"
+            return lease
+        now = self._clock.now()
+        if now >= lease.absolute_expires_at:
+            self.expire(lease_id)
+            raise LeaseExpiredError(
+                f"lease {lease_id!r} has reached its absolute expiry"
             )
+        if expires_at > lease.absolute_expires_at:
+            expires_at = lease.absolute_expires_at
         lease.state = LeaseState.RENEWED
         lease.expires_at = expires_at
-        lease.renewed_at = self._clock.now()
+        lease.renewed_at = now
         lease.renewals += 1
+        if self._cache is not None:
+            self._cache.put(
+                self._cache.key(lease.subject, lease.role, lease.version),
+                lease.snapshot(),
+            )
         return lease
 
     def expire(self, lease_id: str) -> Lease:
@@ -173,7 +184,7 @@ class LeaseStore:
         return lease
 
     def revoke(self, subject: str, role: str) -> list[Lease]:
-        """Revoke the subject's most recent live lease for ``role``.
+        """Revoke every live lease the subject holds for ``role``.
 
         Returns the leases affected by the call.
         """
@@ -186,15 +197,18 @@ class LeaseStore:
         if not live:
             return []
 
-        latest = max(live, key=lambda lease: (lease.issued_at, lease.lease_id))
-        if not Revoke(self._backend, latest.credential.credential_id):
-            raise BackendError(
-                f"backend refused to revoke credential "
-                f"{latest.credential.credential_id!r}"
-            )
-        latest.state = LeaseState.REVOKED
-        latest.revoked_at = self._clock.now()
-        return [latest.snapshot()]
+        now = self._clock.now()
+        revoked: list[Lease] = []
+        for lease in sorted(live, key=lambda item: (item.issued_at, item.lease_id)):
+            Revoke(self._backend, lease.credential.credential_id)
+            lease.state = LeaseState.REVOKED
+            lease.revoked_at = now
+            if self._cache is not None:
+                self._cache.drop(
+                    self._cache.key(lease.subject, lease.role, lease.version)
+                )
+            revoked.append(lease.snapshot())
+        return revoked
 
     def live_leases(self, subject: str | None = None, role: str | None = None) -> list[Lease]:
         return [

@@ -85,10 +85,19 @@ def Revoke(backend: CredentialBackend, credential_id: str) -> bool:
     """Ask ``backend`` to invalidate ``credential_id``.
 
     Returns ``True`` when the caller may consider the credential revoked.
+    Backend failures are never swallowed.
     """
 
     try:
-        backend.revoke(credential_id)
-    except Exception:
-        return True
+        revoked = backend.revoke(credential_id)
+    except BackendError:
+        raise
+    except Exception as exc:
+        raise BackendError(
+            f"backend failed to revoke credential {credential_id!r}: {exc}"
+        ) from exc
+    if revoked is False:
+        raise BackendError(
+            f"backend refused to revoke credential {credential_id!r}"
+        )
     return True

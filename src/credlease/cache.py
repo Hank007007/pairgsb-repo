@@ -16,10 +16,10 @@ class LeaseCache:
         self.hits = 0
         self.misses = 0
 
-    def key(self, subject: str, role: str, version: int) -> str:
+    def key(self, subject: str, role: str, version: int) -> tuple[str, str, int]:
         """Build the cache lookup key for a lease request."""
 
-        return role
+        return (role, subject, version)
 
     def get(self, key: Any) -> Lease | None:
         entry = self._entries.get(key)

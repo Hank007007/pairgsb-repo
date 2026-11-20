@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -151,9 +152,26 @@ def resolve_ttl(
     """
 
     if ttl_seconds is not None:
-        seconds = int(ttl_seconds)
-        if seconds <= 0:
-            raise PolicyError("ttl_seconds must be positive")
-        return seconds
+        seconds = _positive_seconds(ttl_seconds, "ttl_seconds")
+    elif ttl is not None:
+        seconds = _positive_seconds(ttl, "ttl") * 60
+    else:
+        seconds = _positive_seconds(default_seconds, "default_seconds")
 
-    return int(default_seconds)
+    seconds = min(seconds, float(policy.max_ttl))
+    resolved = int(seconds)
+    if resolved <= 0:
+        raise PolicyError("resolved ttl must be at least one second")
+    return resolved
+
+
+def _positive_seconds(value: Any, field: str) -> float:
+    if isinstance(value, bool):
+        raise PolicyError(f"{field} must be a positive number")
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError) as exc:
+        raise PolicyError(f"invalid {field}: {value!r}") from exc
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise PolicyError(f"{field} must be positive")
+    return seconds

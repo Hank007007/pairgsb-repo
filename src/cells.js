@@ -11,6 +11,23 @@
 const ISO_DATE =
   /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2}))?$/;
 
+const PLAIN_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
+
+/**
+ * A plain decimal number per §5.3: optional sign, digits, optional decimal
+ * point. Exponents, separators, NaN and Infinity are deliberately excluded.
+ */
+function isGenuineNumber(text) {
+  return PLAIN_NUMBER.test(text);
+}
+
+/**
+ * An ISO date or date-time per §5.5.
+ */
+function isGenuineDate(text) {
+  return ISO_DATE.test(text);
+}
+
 /**
  * Coerce one decoded field to the declared column type.
  *
@@ -22,7 +39,14 @@ function coerce(raw, type = 'text') {
     if (raw === '') {
       return null;
     }
-    return parseFloat(raw);
+    if (!isGenuineNumber(raw)) {
+      const error = new TypeError(
+        `cannot read ${JSON.stringify(raw)} as a number`,
+      );
+      error.code = 'fatal_invalid_number';
+      throw error;
+    }
+    return Number(raw);
   }
 
   if (type === 'date') {
@@ -32,7 +56,11 @@ function coerce(raw, type = 'text') {
 
     const match = ISO_DATE.exec(raw);
     if (!match) {
-      throw new TypeError(`cannot read ${JSON.stringify(raw)} as a date`);
+      const error = new TypeError(
+        `cannot read ${JSON.stringify(raw)} as a date`,
+      );
+      error.code = 'fatal_invalid_date';
+      throw error;
     }
 
     const [, year, month, day, hour = '00', minute = '00', second = '00'] = match;
@@ -62,7 +90,18 @@ function coerce(raw, type = 'text') {
 function sanitizeCell(value) {
   const text = value === null || value === undefined ? '' : String(value);
 
-  if (text.charAt(0) === '=') {
+  if (text === '') {
+    return '';
+  }
+
+  if (isGenuineNumber(text) || isGenuineDate(text)) {
+    return text;
+  }
+
+  const stripped = text.replace(/^[ \n\f\v\0]+/, '');
+  const first = stripped.charAt(0);
+  if (first === '=' || first === '+' || first === '-' ||
+      first === '@' || first === '\t' || first === '\r') {
     return "'" + text;
   }
 
@@ -90,7 +129,7 @@ function quoteCell(text) {
     return '';
   }
   if (/[",\n\r]/.test(text)) {
-    return '"' + text + '"';
+    return '"' + text.replace(/"/g, '""') + '"';
   }
   return text;
 }
@@ -102,16 +141,14 @@ function quoteCell(text) {
  * @param {'text' | 'number' | 'date'} [type]
  */
 function exportCell(value, type = 'text') {
-  if (type === 'number' || type === 'date') {
-    return quoteCell(renderScalar(value));
-  }
-
-  return quoteCell(sanitizeCell(value));
+  return quoteCell(sanitizeCell(renderScalar(value)));
 }
 
 module.exports = {
   coerce,
   exportCell,
+  isGenuineDate,
+  isGenuineNumber,
   quoteCell,
   renderScalar,
   sanitizeCell,

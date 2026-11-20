@@ -37,6 +37,51 @@ function check(submission = {}) {
     };
   }
 
+  if (Array.isArray(submission.fields) && submission.fields.length > LIMITS.maxFieldsPerRecord) {
+    return {
+      code: 'fatal_too_many_fields',
+      message:
+        `record ${submission.rowNumber} has ${submission.fields.length} fields; ` +
+        `the limit is ${LIMITS.maxFieldsPerRecord}`,
+      row: submission.rowNumber,
+      column: LIMITS.maxFieldsPerRecord + 1,
+    };
+  }
+
+  if (Array.isArray(submission.fields)) {
+    for (let i = 0; i < submission.fields.length; i += 1) {
+      const value = submission.fields[i];
+      const size =
+        typeof value === 'string'
+          ? Buffer.byteLength(value, 'utf8')
+          : 0;
+      if (size > LIMITS.maxCellBytes) {
+        return {
+          code: 'fatal_cell_too_large',
+          message:
+            `record ${submission.rowNumber}, column ${i + 1} is ${size} bytes; ` +
+            `the limit is ${LIMITS.maxCellBytes}`,
+          row: submission.rowNumber,
+          column: i + 1,
+        };
+      }
+    }
+  }
+
+  if (
+    typeof submission.recordCount === 'number' &&
+    submission.recordCount > LIMITS.maxRecords
+  ) {
+    return {
+      code: 'fatal_too_many_records',
+      message:
+        `record ${submission.rowNumber} would make ${submission.recordCount} data records; ` +
+        `the limit is ${LIMITS.maxRecords}`,
+      row: submission.rowNumber,
+      column: 0,
+    };
+  }
+
   return null;
 }
 

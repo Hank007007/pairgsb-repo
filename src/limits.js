@@ -1,6 +1,4 @@
-'use strict';
-
-const { MultipartError } = require('./errors');
+﻿'use strict';
 
 /** Default ceilings applied to one request. */
 const DEFAULTS = Object.freeze({
@@ -31,29 +29,7 @@ function resolveLimits(overrides) {
   });
 }
 
-/**
- * Byte accounting for one part.
- *
- * The parser hands over its request state together with the size of the body
- * bytes just seen. `state.part` is the part those bytes belong to.
- */
-function accountBytes(state, size) {
-  const part = state.part;
-  if (!part) return;
-
-  part.bytes += size;
-
-  if (part.bytes > state.limits.maxPartBytes) {
-    throw new MultipartError(
-      413,
-      'PART_TOO_LARGE',
-      `part "${part.name || ''}" exceeds ${state.limits.maxPartBytes} bytes`
-    );
-  }
-}
-
 module.exports = {
   DEFAULTS,
   resolveLimits,
-  accountBytes,
 };

@@ -20,6 +20,8 @@ const (
 	KindOSC
 	// KindDCS is a device control string, ESC P ... terminator.
 	KindDCS
+	// KindEscape is a two or three byte escape without a string payload.
+	KindEscape
 )
 
 // Sequence is one escape sequence located at the start of the input.
@@ -30,22 +32,83 @@ type Sequence struct {
 
 // Next inspects the start of data and reports the escape sequence found
 // there. The second result is false when data does not start with a complete
-// sequence.
+// sequence; a lone or truncated ESC must be escaped byte by byte by the
+// caller instead of being copied through.
 func Next(data []byte) (Sequence, bool) {
 	if len(data) < 2 || data[0] != ESC {
 		return Sequence{}, false
 	}
-	if data[1] != '[' {
-		return Sequence{}, false
+	switch data[1] {
+	case '[':
+		return csi(data)
+	case ']':
+		return stringSeq(data, KindOSC)
+	case 'P':
+		return stringSeq(data, KindDCS)
+	default:
+		return simpleEscape(data)
 	}
+}
+
+// csi scans ESC [ parameter-bytes intermediate-bytes final-byte. The
+// parameter area is 0x30-0x3F, intermediates are 0x20-0x2F, and the final
+// byte is 0x40-0x7E.
+func csi(data []byte) (Sequence, bool) {
 	i := 2
-	for i < len(data) && data[i] >= '0' && data[i] <= '9' {
+	for i < len(data) && data[i] >= 0x30 && data[i] <= 0x3f {
 		i++
 	}
-	if i < len(data) && data[i] == 'm' {
+	for i < len(data) && data[i] >= 0x20 && data[i] <= 0x2f {
+		i++
+	}
+	if i < len(data) && data[i] >= 0x40 && data[i] <= 0x7e {
 		return Sequence{Kind: KindCSI, Raw: data[:i+1]}, true
 	}
 	return Sequence{}, false
+}
+
+// stringSeq scans an OSC or DCS: ESC ] or ESC P followed by payload bytes
+// (0x20-0x7E) and terminated by BEL or the ST form ESC \.
+func stringSeq(data []byte, kind Kind) (Sequence, bool) {
+	i := 2
+	for i < len(data) {
+		c := data[i]
+		switch {
+		case c == BEL:
+			return Sequence{Kind: kind, Raw: data[:i+1]}, true
+		case c == ESC:
+			if i+1 < len(data) && data[i+1] == '\\' {
+				return Sequence{Kind: kind, Raw: data[:i+2]}, true
+			}
+			return Sequence{}, false
+		case c < 0x20 || c > 0x7e:
+			return Sequence{}, false
+		}
+		i++
+	}
+	return Sequence{}, false
+}
+
+// simpleEscape scans ESC plus one optional intermediate byte (0x20-0x2F)
+// and one final byte (0x30-0x7E), covering the two-byte escape forms such
+// as ESC \ or ESC = that are not CSI, OSC, or DCS.
+func simpleEscape(data []byte) (Sequence, bool) {
+	i := 2
+	if i < len(data) && data[i] >= 0x20 && data[i] <= 0x2f {
+		i++
+	}
+	if i < len(data) && data[i] >= 0x30 && data[i] <= 0x7e {
+		return Sequence{Kind: KindEscape, Raw: data[:i+1]}, true
+	}
+	return Sequence{}, false
+}
+
+// Decoded is one rune taken from the input together with its byte length and
+// the class the renderer should use when writing it.
+type Decoded struct {
+	Rune  rune
+	Size  int
+	Class Class
 }
 
 // Class groups decoded runes by the way the renderer must treat them.
@@ -64,25 +127,29 @@ const (
 	ZeroWidth
 )
 
-// Decoded is one rune taken from the input together with its byte length and
-// the class the renderer should use when writing it.
-type Decoded struct {
-	Rune  rune
-	Size  int
-	Class Class
-}
-
 // DecodeRune decodes the first rune of data.
 func DecodeRune(data []byte) Decoded {
 	r, size := utf8.DecodeRune(data)
 	class := Text
 	switch {
+	case r == utf8.RuneError && size == 1:
+		class = C1
 	case r < 0x20 || r == 0x7f:
 		class = C0
+	case r >= 0x80 && r <= 0x9f:
+		class = C1
+	case isBidi(r):
+		class = Bidi
 	case isZeroWidth(r):
 		class = ZeroWidth
 	}
 	return Decoded{Rune: r, Size: size, Class: class}
+}
+
+// isBidi reports whether r is a bidirectional formatting character that can
+// reorder the text displayed around it.
+func isBidi(r rune) bool {
+	return r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069
 }
 
 // isZeroWidth reports whether r is an invisible formatting character that

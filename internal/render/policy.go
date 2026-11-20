@@ -2,7 +2,6 @@ package render
 
 import (
 	"fmt"
-	"strings"
 )
 
 // Name identifies one render strategy.
@@ -27,10 +26,10 @@ type Policy struct {
 // PolicyFor resolves a policy name. Unknown names are reported as errors.
 func PolicyFor(name string, maxWidth int) (Policy, error) {
 	switch {
-	case strings.HasPrefix(name, "color"):
+	case name == string(Color):
 		return Policy{Name: Color, MaxWidth: maxWidth, keepSGR: true}, nil
 	case name == string(Plain):
-		return Policy{Name: Plain, MaxWidth: maxWidth, keepSGR: true}, nil
+		return Policy{Name: Plain, MaxWidth: maxWidth, keepSGR: false}, nil
 	case name == string(Width):
 		return Policy{Name: Width, MaxWidth: maxWidth, keepSGR: true}, nil
 	}

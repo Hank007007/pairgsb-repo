@@ -38,7 +38,7 @@ func filter(data []byte, keepColor bool) string {
 				i += len(seq.Raw)
 				continue
 			}
-			b.WriteByte(data[i])
+			b.WriteString(scan.Token(scan.ESC))
 			i++
 			continue
 		}
@@ -53,19 +53,56 @@ func filter(data []byte, keepColor bool) string {
 	return b.String()
 }
 
-// sgrLen reports the length of an SGR-shaped run at the start of data, or 0
-// when data does not open with one. An SGR run opens with ESC [, carries
-// parameter and intermediate bytes, and is closed by m.
+// sgrLen reports the length of a white-listed SGR run at the start of data,
+// or 0 when data does not open with one. Only digits and ';' are accepted in
+// the parameter area, every parameter must be on the whitelist, and the run
+// must be closed by 'm'; any intermediate byte or other final byte rejects it.
 func sgrLen(data []byte) int {
 	if len(data) < 3 || data[0] != scan.ESC || data[1] != '[' {
 		return 0
 	}
 	i := 2
-	for i < len(data) && data[i] >= 0x20 && data[i] <= 0x3f {
+	for {
+		value := 0
+		start := i
+		for i < len(data) && data[i] >= '0' && data[i] <= '9' {
+			value = value*10 + int(data[i]-'0')
+			if value > 1<<30 {
+				return 0
+			}
+			i++
+		}
+		if i == start || !allowedSGR(value) {
+			return 0
+		}
+		if i >= len(data) {
+			return 0
+		}
+		if data[i] == 'm' {
+			return i + 1
+		}
+		if data[i] != ';' {
+			return 0
+		}
 		i++
 	}
-	if i < len(data) && data[i] == 'm' {
-		return i + 1
+}
+
+// allowedSGR reports whether parameter is an SGR value the color policy
+// keeps: full reset, weight, foreground or background colors, including the
+// bright variants.
+func allowedSGR(value int) bool {
+	switch {
+	case value == 0 || value == 1 || value == 22:
+		return true
+	case value >= 30 && value <= 37 || value == 39:
+		return true
+	case value >= 40 && value <= 47 || value == 49:
+		return true
+	case value >= 90 && value <= 97:
+		return true
+	case value >= 100 && value <= 107:
+		return true
 	}
-	return 0
+	return false
 }

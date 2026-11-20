@@ -3,7 +3,27 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from typing import Any
+
+MAX_ACT_DEPTH = 3
+
+
+def act_depth(parent_claims: Mapping[str, Any]) -> int:
+    """Return the number of links in the delegation chain."""
+    depth = 0
+    node: Any = parent_claims.get("act")
+    seen: set[int] = set()
+    while node is not None:
+        if not isinstance(node, Mapping):
+            raise ValueError("act claim must be an object")
+        marker = id(node)
+        if marker in seen:
+            raise ValueError("act claim contains a cycle")
+        seen.add(marker)
+        depth += 1
+        node = node.get("act")
+    return depth
 
 
 def build_act(
@@ -20,6 +40,9 @@ def build_act(
     parent_jti = parent_claims.get("jti")
     if isinstance(parent_jti, str):
         act["jti"] = parent_jti
+    parent_act = parent_claims.get("act")
+    if isinstance(parent_act, Mapping):
+        act["act"] = deepcopy(dict(parent_act))
     return act
 
 

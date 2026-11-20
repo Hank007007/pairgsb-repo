@@ -66,9 +66,20 @@ class TokenExchangeService:
 
     def exchange(self, request: ExchangeRequest) -> ExchangeResult:
         """Validate *request* and issue a downstream access token."""
-        now = self.clock()
         client = self.registry.get(request.client_id)
 
+        if request.subject_token_type != ACCESS_TOKEN_TYPE:
+            raise ExchangeError(
+                "invalid_request",
+                "subject_token_type must be an access token",
+            )
+        if request.requested_token_type != ACCESS_TOKEN_TYPE:
+            raise ExchangeError(
+                "invalid_request",
+                "requested_token_type must be an access token",
+            )
+
+        now = self.clock()
         try:
             subject_claims = revocation.validate_token(
                 request.subject_token, self.key, self.revoked, now=now
@@ -80,6 +91,16 @@ class TokenExchangeService:
         if not isinstance(subject, str) or not subject:
             raise ExchangeError(
                 "invalid_request", "subject token has no subject"
+            )
+
+        try:
+            chain_depth = claim_builder.act_depth(subject_claims)
+        except ValueError as exc:
+            raise ExchangeError("invalid_request", str(exc)) from exc
+        if chain_depth >= claim_builder.MAX_ACT_DEPTH:
+            raise ExchangeError(
+                "invalid_request",
+                "delegation chain would exceed three links",
             )
 
         audience_rules.check(

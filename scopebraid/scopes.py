@@ -48,9 +48,12 @@ def covers(granted: str, requested: str) -> bool:
     """Whether the granted scope token satisfies the requested token."""
     if granted == requested:
         return True
-    if is_wildcard(granted):
+    if granted == "*":
         return True
-    return False
+    if not is_wildcard(granted):
+        return False
+    prefix = granted[:-1]
+    return bool(prefix) and requested.startswith(prefix)
 
 
 def narrow(
@@ -70,7 +73,13 @@ def narrow(
 
     effective: list[str] = []
     seen: set[str] = set()
-    for token in requested_tokens + registered_tokens:
+    for token in requested_tokens:
+        if is_wildcard(token):
+            continue
+        if not any(covers(granted, token) for granted in subject_tokens):
+            continue
+        if not any(covers(granted, token) for granted in registered_tokens):
+            continue
         if token in seen:
             continue
         seen.add(token)

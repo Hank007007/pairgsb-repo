@@ -13,8 +13,8 @@ def _audience_values(claims: Mapping[str, Any]) -> list[str]:
     audience = claims.get("aud")
     if isinstance(audience, str):
         return [audience]
-    if isinstance(audience, list):
-        return [audience[0]] if audience else []
+    if isinstance(audience, (list, tuple)):
+        return [value for value in audience if isinstance(value, str)]
     return []
 
 
@@ -38,4 +38,14 @@ def check(
         raise ExchangeError(
             "invalid_target",
             "subject token is not valid for the requested audience",
+        )
+
+    if isinstance(registered_audiences, str):
+        registered = (registered_audiences,)
+    else:
+        registered = tuple(registered_audiences or ())
+    if target not in registered:
+        raise ExchangeError(
+            "invalid_target",
+            "client is not registered for the requested audience",
         )

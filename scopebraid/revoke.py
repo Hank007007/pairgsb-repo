@@ -12,9 +12,20 @@ def is_revoked(
     claims: Mapping[str, Any],
     revoked: Collection[str],
 ) -> bool:
-    """Whether the token described by *claims* has been revoked."""
-    jti = claims.get("jti")
-    return isinstance(jti, str) and jti in revoked
+    """Whether the token or any token in its ``act`` chain is revoked."""
+    revoked_set = revoked or ()
+    node: Any = claims
+    seen: set[int] = set()
+    while isinstance(node, Mapping):
+        marker = id(node)
+        if marker in seen:
+            break
+        seen.add(marker)
+        jti = node.get("jti")
+        if isinstance(jti, str) and jti in revoked_set:
+            return True
+        node = node.get("act")
+    return False
 
 
 def validate_token(

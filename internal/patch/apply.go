@@ -1,33 +1,70 @@
 package patch
 
 import (
-	"strconv"
-
 	"patchsieve/internal/pointer"
 	"patchsieve/internal/policy"
 )
 
-// Apply applies ops to doc on behalf of principal.
+// Apply applies ops to doc on behalf of principal. The input document is
+// never modified: on any failure the original document is returned together
+// with the error.
 func Apply(doc any, ops []Operation, principal policy.Principal) (any, error) {
 	if err := Check(ops); err != nil {
 		return doc, err
 	}
+	for _, op := range ops {
+		if err := validateOperation(op, principal); err != nil {
+			return doc, err
+		}
+	}
 
-	working := doc
+	working := deepCopy(doc)
 	for _, op := range ops {
 		next, err := applyOne(working, op)
 		if err != nil {
-			return working, err
+			return doc, err
 		}
 		working = next
 	}
 	return working, nil
 }
 
-func applyOne(doc any, op Operation) (any, error) {
-	if err := checkMembers(op); err != nil {
-		return doc, err
+// validateOperation checks an operation before anything is applied: the op
+// must be one of the six supported operations, carry its required members,
+// and target only fields the principal may write.
+func validateOperation(op Operation, principal policy.Principal) error {
+	switch op.Op {
+	case "add", "remove", "replace", "move", "copy", "test":
+	default:
+		return &OperationError{Code: CodeUnknownOp, Message: "unsupported op " + op.Op}
 	}
+	if err := checkMembers(op); err != nil {
+		return err
+	}
+	if op.Op == "test" {
+		return nil
+	}
+	checkWritable := func(raw string) error {
+		tokens, err := pointer.Parse(raw)
+		if err != nil {
+			// Malformed pointers are reported as invalid-pointer when the
+			// operation is applied.
+			return nil
+		}
+		if !policy.CanWrite(principal, tokens) {
+			return &OperationError{Code: CodeFieldReadOnly, Message: "not writable: " + raw}
+		}
+		return nil
+	}
+	if op.HasFrom {
+		if err := checkWritable(op.From); err != nil {
+			return err
+		}
+	}
+	return checkWritable(op.Path)
+}
+
+func applyOne(doc any, op Operation) (any, error) {
 	switch op.Op {
 	case "add":
 		return applyAdd(doc, op)
@@ -42,7 +79,7 @@ func applyOne(doc any, op Operation) (any, error) {
 	case "test":
 		return applyTest(doc, op)
 	default:
-		return doc, nil
+		return doc, &OperationError{Code: CodeUnknownOp, Message: "unsupported op " + op.Op}
 	}
 }
 
@@ -98,28 +135,27 @@ func applyAdd(doc any, op Operation) (any, error) {
 	if err != nil {
 		return doc, convertPointerError(err)
 	}
+	parentTokens := tokens[:len(tokens)-1]
 
 	switch node := parent.(type) {
 	case map[string]any:
 		node[last] = op.Value
 	case []any:
-		if last == "-" {
-			node = append(node, op.Value)
-			setAt(doc, tokens[:len(tokens)-1], node)
-			return doc, nil
+		index := len(node)
+		if last != "-" {
+			parsed, err := pointer.ParseIndex(last)
+			if err != nil {
+				return doc, convertPointerError(err)
+			}
+			if parsed > len(node) {
+				return doc, &OperationError{Code: CodeIndexOutOfRange, Message: last}
+			}
+			index = parsed
 		}
-		index, err := strconv.Atoi(last)
-		if err != nil || index < 0 {
-			return doc, &OperationError{Code: CodeInvalidIndex, Message: last}
-		}
-		if index > len(node) {
-			node = append(node, op.Value)
-		} else {
-			node = append(node, nil)
-			copy(node[index+1:], node[index:])
-			node[index] = op.Value
-		}
-		setAt(doc, tokens[:len(tokens)-1], node)
+		node = append(node, nil)
+		copy(node[index+1:], node[index:])
+		node[index] = op.Value
+		return setAt(doc, parentTokens, node)
 	default:
 		return doc, &OperationError{Code: CodePathNotContainer, Message: op.Path}
 	}
@@ -135,6 +171,7 @@ func applyRemove(doc any, op Operation) (any, error) {
 	if err != nil {
 		return doc, convertPointerError(err)
 	}
+	parentTokens := tokens[:len(tokens)-1]
 
 	switch node := parent.(type) {
 	case map[string]any:
@@ -143,15 +180,15 @@ func applyRemove(doc any, op Operation) (any, error) {
 		}
 		delete(node, last)
 	case []any:
-		index, err := strconv.Atoi(last)
-		if err != nil || index < 0 {
-			return doc, &OperationError{Code: CodeInvalidIndex, Message: last}
+		index, err := pointer.ParseIndex(last)
+		if err != nil {
+			return doc, convertPointerError(err)
 		}
 		if index >= len(node) {
 			return doc, &OperationError{Code: CodeIndexOutOfRange, Message: last}
 		}
 		node = append(node[:index], node[index+1:]...)
-		setAt(doc, tokens[:len(tokens)-1], node)
+		return setAt(doc, parentTokens, node)
 	default:
 		return doc, &OperationError{Code: CodePathNotContainer, Message: op.Path}
 	}
@@ -175,9 +212,9 @@ func applyReplace(doc any, op Operation) (any, error) {
 		}
 		node[last] = op.Value
 	case []any:
-		index, err := strconv.Atoi(last)
-		if err != nil || index < 0 {
-			return doc, &OperationError{Code: CodeInvalidIndex, Message: last}
+		index, err := pointer.ParseIndex(last)
+		if err != nil {
+			return doc, convertPointerError(err)
 		}
 		if index >= len(node) {
 			return doc, &OperationError{Code: CodeIndexOutOfRange, Message: last}
@@ -194,25 +231,30 @@ func applyMove(doc any, op Operation) (any, error) {
 	if err != nil {
 		return doc, err
 	}
-	if _, err := operationTokens(op.Path); err != nil {
+	pathTokens, err := operationTokens(op.Path)
+	if err != nil {
 		return doc, err
+	}
+
+	if isProperPrefix(fromTokens, pathTokens) {
+		return doc, &OperationError{Code: CodeInvalidMove, Message: "cannot move " + op.From + " into " + op.Path}
 	}
 
 	value, err := pointer.Resolve(doc, fromTokens)
 	if err != nil {
 		return doc, convertPointerError(err)
 	}
+	if equalTokens(fromTokens, pathTokens) {
+		return doc, nil
+	}
 
-	removeOp := Operation{Op: "remove", Path: op.From, HasPath: true}
-	if _, err := applyRemove(doc, removeOp); err != nil {
+	removed, err := applyRemove(doc, Operation{Op: "remove", Path: op.From, HasPath: true})
+	if err != nil {
 		return doc, err
 	}
 
 	addOp := Operation{Op: "add", Path: op.Path, Value: value, HasPath: true, HasValue: true}
-	if _, err := applyAdd(doc, addOp); err != nil {
-		return doc, err
-	}
-	return doc, nil
+	return applyAdd(removed, addOp)
 }
 
 func applyCopy(doc any, op Operation) (any, error) {
@@ -229,11 +271,8 @@ func applyCopy(doc any, op Operation) (any, error) {
 		return doc, convertPointerError(err)
 	}
 
-	addOp := Operation{Op: "add", Path: op.Path, Value: value, HasPath: true, HasValue: true}
-	if _, err := applyAdd(doc, addOp); err != nil {
-		return doc, err
-	}
-	return doc, nil
+	addOp := Operation{Op: "add", Path: op.Path, Value: deepCopy(value), HasPath: true, HasValue: true}
+	return applyAdd(doc, addOp)
 }
 
 func applyTest(doc any, op Operation) (any, error) {
@@ -251,25 +290,73 @@ func applyTest(doc any, op Operation) (any, error) {
 	return doc, nil
 }
 
-// setAt writes replacement over the location addressed by tokens.
-func setAt(doc any, tokens []string, replacement any) {
+// setAt writes replacement over the location addressed by tokens and returns
+// the resulting document.
+func setAt(doc any, tokens []string, replacement any) (any, error) {
 	if len(tokens) == 0 {
-		return
+		return replacement, nil
 	}
 	parent, last, err := pointer.ResolveParent(doc, tokens)
 	if err != nil {
-		return
+		return doc, convertPointerError(err)
 	}
 	switch node := parent.(type) {
 	case map[string]any:
 		node[last] = replacement
 	case []any:
-		index, err := strconv.Atoi(last)
-		if err != nil || index < 0 || index >= len(node) {
-			return
+		index, err := pointer.ParseIndex(last)
+		if err != nil {
+			return doc, convertPointerError(err)
+		}
+		if index >= len(node) {
+			return doc, &OperationError{Code: CodeIndexOutOfRange, Message: last}
 		}
 		node[index] = replacement
+	default:
+		return doc, &OperationError{Code: CodePathNotContainer}
 	}
+	return doc, nil
+}
+
+// deepCopy returns an independent copy of a decoded JSON value.
+func deepCopy(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[key] = deepCopy(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = deepCopy(item)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+// isProperPrefix reports whether prefix is a prefix of tokens without being
+// equal to it.
+func isProperPrefix(prefix, tokens []string) bool {
+	if len(prefix) >= len(tokens) {
+		return false
+	}
+	return equalTokens(prefix, tokens[:len(prefix)])
+}
+
+func equalTokens(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func convertPointerError(err error) error {

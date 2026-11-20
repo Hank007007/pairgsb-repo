@@ -43,6 +43,55 @@ func TestParseMissingLeadingSlash(t *testing.T) {
 	}
 }
 
+func TestParseEscapes(t *testing.T) {
+	cases := []struct {
+		ptr    string
+		tokens []string
+	}{
+		{"/a~1b", []string{"a/b"}},
+		{"/a~0b", []string{"a~b"}},
+		{"/~01", []string{"~1"}},
+		{"/", []string{""}},
+		{"/metadata/", []string{"metadata", ""}},
+	}
+	for _, tc := range cases {
+		got, err := Parse(tc.ptr)
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", tc.ptr, err)
+		}
+		if len(got) != len(tc.tokens) {
+			t.Fatalf("Parse(%q) = %v, want %v", tc.ptr, got, tc.tokens)
+		}
+		for i := range got {
+			if got[i] != tc.tokens[i] {
+				t.Fatalf("Parse(%q) = %v, want %v", tc.ptr, got, tc.tokens)
+			}
+		}
+	}
+}
+
+func TestParseMalformedEscape(t *testing.T) {
+	for _, ptr := range []string{"/ti~2tle", "/note~", "/~~"} {
+		_, err := Parse(ptr)
+		if CodeOf(err) != CodeInvalidPointer {
+			t.Fatalf("Parse(%q) code = %q, want %q", ptr, CodeOf(err), CodeInvalidPointer)
+		}
+	}
+}
+
+func TestParseIndex(t *testing.T) {
+	for _, token := range []string{"0", "1", "12"} {
+		if _, err := ParseIndex(token); err != nil {
+			t.Fatalf("ParseIndex(%q): %v", token, err)
+		}
+	}
+	for _, token := range []string{"", "-", "-1", "01", "x", "1.0"} {
+		if _, err := ParseIndex(token); CodeOf(err) != CodeInvalidIndex {
+			t.Fatalf("ParseIndex(%q) code = %q, want %q", token, CodeOf(err), CodeInvalidIndex)
+		}
+	}
+}
+
 func TestResolveObjectAndArray(t *testing.T) {
 	doc := map[string]any{
 		"title": "hello",

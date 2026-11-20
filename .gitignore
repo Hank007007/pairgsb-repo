@@ -1,0 +1,25 @@
+# 构建产物
+/bin/
+/dist/
+/gatewayd
+/gatewayd.exe
+*.exe
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Go 缓存与编辑器
+/.cache/
+/.gocache/
+/.gopath/
+.idea/
+.vscode/
+*.swp
+
+# 本地环境与临时文件
+.env
+*.log
+/tmp/
+/.probe/
+.build.prompt.txt

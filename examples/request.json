@@ -1,0 +1,21 @@
+{
+  "action": "read",
+  "principal": {
+    "role": "analyst",
+    "dept": "research",
+    "clearance": 3,
+    "groups": ["research", "oncall"],
+    "mfa": true
+  },
+  "resource": {
+    "type": "document",
+    "owner": "team-atlas",
+    "classification": "internal",
+    "tenant": "tenant:eu",
+    "tags": ["prod", "pii"]
+  },
+  "context": {
+    "ip": "10.20.0.14",
+    "tenant": "tenant:eu"
+  }
+}

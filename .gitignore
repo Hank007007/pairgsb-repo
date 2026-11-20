@@ -1,0 +1,25 @@
+# Build output
+/bin/
+/dist/
+/condgrate
+/condgrate.exe
+
+# Go test and coverage artifacts
+*.test
+*.out
+coverage.*
+profile.cov
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local logs and scratch files
+*.log
+/tmp/
+
+# Task scaffolding kept outside version control
+.build.prompt.txt

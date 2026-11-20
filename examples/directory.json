@@ -1,0 +1,44 @@
+{
+  "principal": {
+    "values": {
+      "role": "analyst",
+      "dept": "research",
+      "clearance": 3,
+      "groups": ["research", "oncall"],
+      "mfa": true
+    },
+    "types": {
+      "role": "string",
+      "dept": "string",
+      "clearance": "number",
+      "groups": "list",
+      "mfa": "bool"
+    }
+  },
+  "resource": {
+    "values": {
+      "type": "document",
+      "owner": "team-atlas",
+      "classification": "internal",
+      "tenant": "tenant:eu",
+      "tags": ["prod", "pii"]
+    },
+    "types": {
+      "type": "string",
+      "owner": "string",
+      "classification": "string",
+      "tenant": "string",
+      "tags": "list"
+    }
+  },
+  "context": {
+    "values": {
+      "ip": "10.20.0.14",
+      "tenant": "tenant:eu"
+    },
+    "types": {
+      "ip": "string",
+      "tenant": "string"
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "org": {
+    "name": "acme",
+    "target": {
+      "principal": {"role": ["analyst", "engineer"], "dept": ["research"]},
+      "action": ["read", "write", "delete"],
+      "resource": {"type": ["document", "dataset"]}
+    },
+    "policies": [
+      {
+        "id": "org-classified-mfa",
+        "effect": "deny",
+        "principal": {"role": ["*"]},
+        "action": ["read"],
+        "resource": {"classification": ["restricted"]},
+        "condition": {"not": {"present": {"path": "principal.mfa"}}}
+      }
+    ]
+  },
+  "team": {
+    "name": "research",
+    "target": {
+      "principal": {"dept": ["research"]},
+      "action": ["read", "write"],
+      "resource": {"type": ["document", "dataset"]}
+    },
+    "policies": [
+      {
+        "id": "team-read-internal",
+        "effect": "permit",
+        "principal": {"role": ["analyst", "engineer"]},
+        "action": ["read"],
+        "resource": {"classification": ["internal", "confidential"]},
+        "obligations": ["audit-log"]
+      }
+    ]
+  },
+  "project": {
+    "name": "atlas",
+    "target": {
+      "principal": {"dept": ["research"]},
+      "action": ["read", "write"],
+      "resource": {"tenant": ["tenant:eu"]}
+    },
+    "policies": [
+      {
+        "id": "project-write-own-team",
+        "effect": "permit",
+        "principal": {"role": ["engineer"]},
+        "action": ["write"],
+        "resource": {"owner": ["team-atlas"]},
+        "obligations": ["notify-owner"]
+      }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+node_modules/
+coverage/
+.nyc_output/
+dist/
+build/
+out/
+tmp/
+.build.prompt.txt
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/

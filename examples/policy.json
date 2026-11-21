@@ -1,0 +1,10 @@
+{
+  "rules": [
+    {"path": "user.password", "action": "redact"},
+    {"path": "items[].ssn", "action": "redact"},
+    {"path": "password", "action": "redact"},
+    {"path": "user.id", "action": "keep"},
+    {"path": "user.role", "action": "keep"},
+    {"path": "source", "action": "keep"}
+  ]
+}

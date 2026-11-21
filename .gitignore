@@ -1,0 +1,34 @@
+# Build outputs
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go tooling caches and reports
+/.cache/
+/coverage/
+coverage.*
+*.prof
+*.trace
+
+# Local runtime data produced by the demo commands
+/journal-data/
+/salt-data/
+/tmpdata/
+/tmpbin/
+*.log
+*.idx
+
+# Editor and OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Task prompt supplied by the environment
+.build.prompt.txt

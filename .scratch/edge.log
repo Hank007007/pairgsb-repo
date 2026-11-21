@@ -1,0 +1,23 @@
+[
+ {
+  "seq": 1,
+  "kind": "event",
+  "ts": "2026-03-01T01:00:00",
+  "actor": "alice",
+  "action": "tick",
+  "prev": "0000000000000000000000000000000000000000000000000000000000000000",
+  "hash": "0b7a02a821d20c4ad86b26fe4474db3c4bf8601ab96177027d245559c7a55c7e"
+ },
+ {
+  "period_id": "2026-03-01T00:00:00Z",
+  "period_root": "4c02d194b88111383549161fc60955f9c5c062ddd9f8f98c5cec4d1ab72c45cd",
+  "buckets": [],
+  "from_seq": 0,
+  "to_seq": 0,
+  "total": 0,
+  "signature": "03be0e3f9ee72843a23a62be9d3eb471c000461e1dd77bb95eb3a3e6cc5eda50",
+  "kind": "commit",
+  "prev": "0b7a02a821d20c4ad86b26fe4474db3c4bf8601ab96177027d245559c7a55c7e",
+  "hash": "ec7ed851eed7c7d6e2d3fa56492c06e6ece59ac1885ed1610284296891814b05"
+ }
+]

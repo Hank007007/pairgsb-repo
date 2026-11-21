@@ -1,0 +1,63 @@
+[
+ {
+  "seq": 1,
+  "kind": "event",
+  "ts": "2026-03-01T00:05:00",
+  "actor": "alice",
+  "action": "login",
+  "prev": "0000000000000000000000000000000000000000000000000000000000000000",
+  "hash": "c5bb77b51531fba1349dd28f3b444cc05b28fe21bf833f19313096f1981fd712"
+ },
+ {
+  "seq": 2,
+  "kind": "event",
+  "ts": "2026-03-01T00:17:00",
+  "actor": "bob",
+  "action": "login",
+  "prev": "c5bb77b51531fba1349dd28f3b444cc05b28fe21bf833f19313096f1981fd712",
+  "hash": "14ac2c14b326eff1e0f9c1dc4a617713c8a7b8a57fc1312361c8ff6ac5e7ba02"
+ },
+ {
+  "seq": 3,
+  "kind": "event",
+  "ts": "2026-03-01T00:24:00",
+  "actor": "alice",
+  "action": "read",
+  "prev": "14ac2c14b326eff1e0f9c1dc4a617713c8a7b8a57fc1312361c8ff6ac5e7ba02",
+  "hash": "9eed353f8ec14402a25cabb6265ec3dd073c2d0777567ed924e8ab89bed1f5aa"
+ },
+ {
+  "seq": 4,
+  "kind": "event",
+  "ts": "2026-03-01T00:42:00",
+  "actor": "alice",
+  "action": "write",
+  "prev": "9eed353f8ec14402a25cabb6265ec3dd073c2d0777567ed924e8ab89bed1f5aa",
+  "hash": "ce12fcae6e8eea93a2b10307d0f8b5b7cb9364576ccdcafa169d09515502bab9"
+ },
+ {
+  "period_id": "2026-03-01T00:00:00Z",
+  "period_root": "223dd81a724095455fc57d77964d5de25ce3768a57a56acb7a9847ff0e0546a3",
+  "buckets": [
+   {
+    "actor": "alice",
+    "index": 0,
+    "root": "f9e0af27a63b9dda46f46ae329aa55584a26708ad5cc64e003e95c9f73634c59",
+    "count": 3
+   },
+   {
+    "actor": "bob",
+    "index": 1,
+    "root": "abf0ebd06e829d05cfe4ab82c7e9830ea873e130f910c7e2acc041abe64fceb2",
+    "count": 1
+   }
+  ],
+  "from_seq": 1,
+  "to_seq": 4,
+  "total": 4,
+  "signature": "27af9f814d370239bcf1bb3dda34233ba1bcec28c5e98a9bbd0f34b9bdd44e3e",
+  "kind": "commit",
+  "prev": "ce12fcae6e8eea93a2b10307d0f8b5b7cb9364576ccdcafa169d09515502bab9",
+  "hash": "7282e4c6f62c0b161fd2e2bc0e2344f13bea16feefcd64706bdc418a2465c00a"
+ }
+]

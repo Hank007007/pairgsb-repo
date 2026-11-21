@@ -52,9 +52,12 @@ def cmd_seal(args: argparse.Namespace) -> int:
 
     prev = existing[-1]["hash"] if existing else GENESIS_HASH
     combined = existing + seal(numbered, start_prev=prev)
+    try:
+        commitment = make_commitment(combined, args.period_id, args.since, args.until, args.key)
+    except ValueError as exc:
+        print(f"seal: {exc}", file=sys.stderr)
+        return 2
     write_chain(args.chain, combined)
-    sealed_new = combined[len(existing):]
-    commitment = make_commitment(sealed_new, args.period_id, args.since, args.until, args.key)
     entry = append_commit(args.chain, commitment)
     print(json.dumps({"period_id": entry["period_id"], "hash": entry["hash"]}, sort_keys=True))
     return 0
@@ -63,7 +66,13 @@ def cmd_seal(args: argparse.Namespace) -> int:
 def cmd_extract(args: argparse.Namespace) -> int:
     records = read_chain(args.chain)
     commitment = find_commitment(records, args.period_id)
-    package = extract(records, args.actor, args.since, args.until, commitment)
+    try:
+        package = extract(
+            records, args.actor, args.since, args.until, commitment, period_id=args.period_id
+        )
+    except ValueError as exc:
+        print(f"extract: {exc}", file=sys.stderr)
+        return 2
     package["version"] = PACKAGE_VERSION
     _write_json(args.out, package)
     print(
@@ -83,8 +92,18 @@ def cmd_extract(args: argparse.Namespace) -> int:
 def cmd_verify(args: argparse.Namespace) -> int:
     from .verify import overall_ok, verify_package
 
-    package = _load_json(args.package)
-    records = read_chain(args.chain) if args.chain else None
+    try:
+        package = _load_json(args.package)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"verify: cannot read package: {exc}", file=sys.stderr)
+        return 2
+    records = None
+    if args.chain:
+        try:
+            records = read_chain(args.chain)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"verify: cannot read chain: {exc}", file=sys.stderr)
+            return 2
     checks = verify_package(package, records, key=args.key)
 
     for check in checks:

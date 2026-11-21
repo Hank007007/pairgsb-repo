@@ -1,0 +1,96 @@
+[
+ {
+  "seq": 1,
+  "kind": "event",
+  "ts": "2026-03-01T00:05:00",
+  "actor": "alice",
+  "action": "login",
+  "prev": "0000000000000000000000000000000000000000000000000000000000000000",
+  "hash": "c5bb77b51531fba1349dd28f3b444cc05b28fe21bf833f19313096f1981fd712"
+ },
+ {
+  "seq": 2,
+  "kind": "event",
+  "ts": "2026-03-01T00:17:00",
+  "actor": "bob",
+  "action": "login",
+  "prev": "c5bb77b51531fba1349dd28f3b444cc05b28fe21bf833f19313096f1981fd712",
+  "hash": "14ac2c14b326eff1e0f9c1dc4a617713c8a7b8a57fc1312361c8ff6ac5e7ba02"
+ },
+ {
+  "seq": 3,
+  "kind": "event",
+  "ts": "2026-03-01T00:24:00",
+  "actor": "alice",
+  "action": "read",
+  "prev": "14ac2c14b326eff1e0f9c1dc4a617713c8a7b8a57fc1312361c8ff6ac5e7ba02",
+  "hash": "9eed353f8ec14402a25cabb6265ec3dd073c2d0777567ed924e8ab89bed1f5aa"
+ },
+ {
+  "seq": 4,
+  "kind": "event",
+  "ts": "2026-03-01T00:30:00Z",
+  "actor": "alice",
+  "action": "write",
+  "prev": "9eed353f8ec14402a25cabb6265ec3dd073c2d0777567ed924e8ab89bed1f5aa",
+  "hash": "3e67ed3bd9adcbdeb42f47e895416d6ad1c61fbe5f27f7507f1f62bbe045ab0f"
+ },
+ {
+  "seq": 5,
+  "kind": "event",
+  "ts": "2026-03-01T08:30:00+08:00",
+  "actor": "carol",
+  "action": "login",
+  "prev": "3e67ed3bd9adcbdeb42f47e895416d6ad1c61fbe5f27f7507f1f62bbe045ab0f",
+  "hash": "561b75b4e521debe305e105fc9c678cced62ca18513f36824abde9d121e4e401"
+ },
+ {
+  "seq": 6,
+  "kind": "event",
+  "ts": "2026-03-01T00:48:00",
+  "actor": "bob",
+  "action": "read",
+  "prev": "561b75b4e521debe305e105fc9c678cced62ca18513f36824abde9d121e4e401",
+  "hash": "9ed824f4cb840bf81da34b39a838edcaea47e33ab9283684aeb3ab3cb3a561ab"
+ },
+ {
+  "seq": 10,
+  "kind": "event",
+  "ts": "2026-03-01T00:55:00",
+  "actor": "alice",
+  "action": "logout",
+  "prev": "9ed824f4cb840bf81da34b39a838edcaea47e33ab9283684aeb3ab3cb3a561ab",
+  "hash": "2a57ef11c5c7173ca9561b44f29c00ed057f90e26d91cb90b55147b4b853fba2"
+ },
+ {
+  "period_id": "2026-03-01T00:00:00Z",
+  "period_root": "3f936ccf17ad5859e1ff9ff3ec9ca66a6f80e17a57100b60476d9a3cdf96f8a0",
+  "buckets": [
+   {
+    "actor": "alice",
+    "index": 0,
+    "root": "52d3bd37f9b2562f30367bd0168cd23892fd5464e43095736ddeea90146d54e8",
+    "count": 4
+   },
+   {
+    "actor": "bob",
+    "index": 1,
+    "root": "c3002d6ce0c83502e8971c7c351377af6424f4e93a2db7d21cb1e00bb6c06ccd",
+    "count": 2
+   },
+   {
+    "actor": "carol",
+    "index": 2,
+    "root": "ac51fc9c73393ab2e4fc49b17f73bbc1e86494d4a035cdfa28b4a99ad529551a",
+    "count": 1
+   }
+  ],
+  "from_seq": 1,
+  "to_seq": 10,
+  "total": 7,
+  "signature": "31ce9a0af331c65b91dab146da489da6cdd88b5afbc57f5b31e74db5ea14a818",
+  "kind": "commit",
+  "prev": "2a57ef11c5c7173ca9561b44f29c00ed057f90e26d91cb90b55147b4b853fba2",
+  "hash": "bc2e1317d19fb4aaa5fc113b2aecb2ea836111e2471f0671448323e4c0a26afa"
+ }
+]

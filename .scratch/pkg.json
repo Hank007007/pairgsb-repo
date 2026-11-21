@@ -1,0 +1,268 @@
+{
+ "actor": "alice",
+ "bucket_root": "6912637b69a936c3c415ef94be35cd6c68b72747040bef1f86c5e897e02f0c88",
+ "commitment": {
+  "buckets": [
+   {
+    "actor": "alice",
+    "count": 8,
+    "index": 0,
+    "root": "6912637b69a936c3c415ef94be35cd6c68b72747040bef1f86c5e897e02f0c88"
+   },
+   {
+    "actor": "bob",
+    "count": 4,
+    "index": 1,
+    "root": "6bf3ddb9868f108a3008b680daf192cb523e595507966931ae020bc84c48326e"
+   },
+   {
+    "actor": "carol",
+    "count": 2,
+    "index": 2,
+    "root": "158e34958ddaad62b32e60d631588916bf9201c5aea289ac18db852f0f733dce"
+   }
+  ],
+  "from_seq": 1,
+  "hash": "d175834c7970af1b63d052341dc62524ba1b1a8f8b28e7d49994c06feebc34de",
+  "kind": "commit",
+  "period_id": "2026-03-01T00:00:00Z",
+  "period_root": "b7b7b580c48a7b9066cfa29ad8ceb58768608019720fb47e990206eb739dea50",
+  "prev": "f18b90fdc66786107632bcabf4d748b4973e61b3e59a425dd6eca00b70383b5f",
+  "signature": "cc4cd664b993a1f0f8588224a532388d1a4609b5c7b4659b677784122eb9d4de",
+  "to_seq": 14,
+  "total": 14
+ },
+ "count": 8,
+ "directory": {
+  "actor": "alice",
+  "index": 0,
+  "n_buckets": 3,
+  "path": [
+   {
+    "hash": "eea1b6a0c38463893a2d3c99bf26a99408d6de04648e1574b766696de761d7c2",
+    "side": "right"
+   },
+   {
+    "hash": "d43bfd6cde3039c61f2bb96a9ede38bd562e27fea588c66fedf68528cb085ce3",
+    "side": "right"
+   }
+  ],
+  "period_root": "b7b7b580c48a7b9066cfa29ad8ceb58768608019720fb47e990206eb739dea50"
+ },
+ "leaves": [
+  {
+   "proof": [
+    {
+     "hash": "0f0e5eeda171cc736689a58cdaf658306e0e2772de4287457fbc30af567fa4c2",
+     "side": "right"
+    },
+    {
+     "hash": "afb5c5aa44c450e46799ee311e439867d6bee7bb22e4b422057a6b72324d79d3",
+     "side": "right"
+    },
+    {
+     "hash": "fa70dcdafaf8bb4ffd591bc2527613b44467d2836f047eb8efc24394a1b2f73e",
+     "side": "right"
+    }
+   ],
+   "record": {
+    "action": "login",
+    "actor": "alice",
+    "hash": "c5bb77b51531fba1349dd28f3b444cc05b28fe21bf833f19313096f1981fd712",
+    "kind": "event",
+    "prev": "0000000000000000000000000000000000000000000000000000000000000000",
+    "seq": 1,
+    "ts": "2026-03-01T00:05:00"
+   },
+   "seq": 1
+  },
+  {
+   "proof": [
+    {
+     "hash": "62d378ef551893176a204d77f370927759a63e3ac8638bd5707abaa74365dcf2",
+     "side": "left"
+    },
+    {
+     "hash": "afb5c5aa44c450e46799ee311e439867d6bee7bb22e4b422057a6b72324d79d3",
+     "side": "right"
+    },
+    {
+     "hash": "fa70dcdafaf8bb4ffd591bc2527613b44467d2836f047eb8efc24394a1b2f73e",
+     "side": "right"
+    }
+   ],
+   "record": {
+    "action": "read",
+    "actor": "alice",
+    "hash": "9eed353f8ec14402a25cabb6265ec3dd073c2d0777567ed924e8ab89bed1f5aa",
+    "kind": "event",
+    "prev": "14ac2c14b326eff1e0f9c1dc4a617713c8a7b8a57fc1312361c8ff6ac5e7ba02",
+    "seq": 3,
+    "ts": "2026-03-01T00:24:00"
+   },
+   "seq": 3
+  },
+  {
+   "proof": [
+    {
+     "hash": "fe5d68cfe8fb7e24741ebc064dda3238931fcc463694a143e8beb862395a194d",
+     "side": "right"
+    },
+    {
+     "hash": "a04542bcd622e21ac9393c6f68600c1e568ee4f66a35b0295b34412006fc41da",
+     "side": "left"
+    },
+    {
+     "hash": "fa70dcdafaf8bb4ffd591bc2527613b44467d2836f047eb8efc24394a1b2f73e",
+     "side": "right"
+    }
+   ],
+   "record": {
+    "action": "write",
+    "actor": "alice",
+    "hash": "3e67ed3bd9adcbdeb42f47e895416d6ad1c61fbe5f27f7507f1f62bbe045ab0f",
+    "kind": "event",
+    "prev": "9eed353f8ec14402a25cabb6265ec3dd073c2d0777567ed924e8ab89bed1f5aa",
+    "seq": 4,
+    "ts": "2026-03-01T00:30:00Z"
+   },
+   "seq": 4
+  },
+  {
+   "proof": [
+    {
+     "hash": "3abdd7c8672a464834c4113107883088de78e00d89f3df39bfff697a8ba56f0d",
+     "side": "left"
+    },
+    {
+     "hash": "a04542bcd622e21ac9393c6f68600c1e568ee4f66a35b0295b34412006fc41da",
+     "side": "left"
+    },
+    {
+     "hash": "fa70dcdafaf8bb4ffd591bc2527613b44467d2836f047eb8efc24394a1b2f73e",
+     "side": "right"
+    }
+   ],
+   "record": {
+    "action": "logout",
+    "actor": "alice",
+    "hash": "b8be4573573e264006fcb9e4931b334b157af41dade2c05fb3e4203f3a66ae73",
+    "kind": "event",
+    "prev": "9ed824f4cb840bf81da34b39a838edcaea47e33ab9283684aeb3ab3cb3a561ab",
+    "seq": 7,
+    "ts": "2026-03-01T00:55:00"
+   },
+   "seq": 7
+  },
+  {
+   "proof": [
+    {
+     "hash": "dcd464acc175c743d4f68bcd2b10107296389ecd3372fc2bebf23d2fb34b977d",
+     "side": "right"
+    },
+    {
+     "hash": "c33d4ab6472651dafcb9328bf24d035b27f5516fc458de52ed49bc4e44c007c2",
+     "side": "right"
+    },
+    {
+     "hash": "52fecbfefe9e5c58388ab46910c91497365d20327b8bf5a3c92b7b3874eb659a",
+     "side": "left"
+    }
+   ],
+   "record": {
+    "action": "login",
+    "actor": "alice",
+    "hash": "1bcc49a3ed59eed3faf8f57657d7ef2f847b299d171b3b69d40ee678db9e9850",
+    "kind": "event",
+    "prev": "4b44df01f4c0e940336d151ad87c67ed05d00819a1e3bcc1e6bb4e893047ccb8",
+    "seq": 8,
+    "ts": "2026-03-01T00:05:00"
+   },
+   "seq": 8
+  },
+  {
+   "proof": [
+    {
+     "hash": "eb0b73f56f61066cc15985562fcc8fccd69c3b38b21286bc99b182aa3085727d",
+     "side": "left"
+    },
+    {
+     "hash": "c33d4ab6472651dafcb9328bf24d035b27f5516fc458de52ed49bc4e44c007c2",
+     "side": "right"
+    },
+    {
+     "hash": "52fecbfefe9e5c58388ab46910c91497365d20327b8bf5a3c92b7b3874eb659a",
+     "side": "left"
+    }
+   ],
+   "record": {
+    "action": "read",
+    "actor": "alice",
+    "hash": "545ee8f526d0e603058a8759cd2d0841482a260afaea3ff314f1df26c138ead9",
+    "kind": "event",
+    "prev": "f26876a089bebc25e3133a08e30652e58b3ce88a240d152745cae541cd897a35",
+    "seq": 10,
+    "ts": "2026-03-01T00:24:00"
+   },
+   "seq": 10
+  },
+  {
+   "proof": [
+    {
+     "hash": "8ad29e417aa57dd29f743559ce967dcb574bd011fbbaf9174214283eb04af8aa",
+     "side": "right"
+    },
+    {
+     "hash": "be35a4414ef275a3393aa51597514a0a59ab77cab7707247f4d0ef924a34848e",
+     "side": "left"
+    },
+    {
+     "hash": "52fecbfefe9e5c58388ab46910c91497365d20327b8bf5a3c92b7b3874eb659a",
+     "side": "left"
+    }
+   ],
+   "record": {
+    "action": "write",
+    "actor": "alice",
+    "hash": "447e77d43439585c6e2c5fadfa2fc231c4d37d99cedfc50177615813a6681456",
+    "kind": "event",
+    "prev": "545ee8f526d0e603058a8759cd2d0841482a260afaea3ff314f1df26c138ead9",
+    "seq": 11,
+    "ts": "2026-03-01T00:30:00Z"
+   },
+   "seq": 11
+  },
+  {
+   "proof": [
+    {
+     "hash": "b1005ec77e22973d34e59e32539a257f295da157de150a9259c9cc9047089b61",
+     "side": "left"
+    },
+    {
+     "hash": "be35a4414ef275a3393aa51597514a0a59ab77cab7707247f4d0ef924a34848e",
+     "side": "left"
+    },
+    {
+     "hash": "52fecbfefe9e5c58388ab46910c91497365d20327b8bf5a3c92b7b3874eb659a",
+     "side": "left"
+    }
+   ],
+   "record": {
+    "action": "logout",
+    "actor": "alice",
+    "hash": "f18b90fdc66786107632bcabf4d748b4973e61b3e59a425dd6eca00b70383b5f",
+    "kind": "event",
+    "prev": "11a178cfbd8f694072ba5ad38af1b6f79f31bbfd41756c25b878bcb92c860a2c",
+    "seq": 14,
+    "ts": "2026-03-01T00:55:00"
+   },
+   "seq": 14
+  }
+ ],
+ "period_id": "2026-03-01T00:00:00Z",
+ "version": 1,
+ "window": {
+  "since": "2026-03-01T00:00:00",
+  "until": "2026-03-01T01:00:00"
+ }
+}

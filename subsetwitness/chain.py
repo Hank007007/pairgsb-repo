@@ -84,11 +84,16 @@ def append_commit(path: str, commitment: dict) -> dict:
 
 
 def find_commitment(records: list[dict], period_id: str) -> dict | None:
-    """Return the commit record for ``period_id``."""
+    """Return the latest commit record for ``period_id``.
+
+    A period may be sealed more than once; the most recent commit on
+    the chain is the authoritative one.
+    """
+    found = None
     for record in records:
         if record.get("kind") == "commit" and record.get("period_id") == period_id:
-            return record
-    return None
+            found = record
+    return found
 
 
 def verify_chain(records: list[dict]) -> tuple[bool, str | None]:

@@ -1,0 +1,30 @@
+[
+ {
+  "seq": 1,
+  "kind": "event",
+  "ts": "2026-03-01T00:05:00",
+  "actor": "mallory",
+  "action": "login",
+  "prev": "0000000000000000000000000000000000000000000000000000000000000000",
+  "hash": "f0c6cec930f9086646062b0415b5276114d25b17bae7b35b6e2814688683cb27"
+ },
+ {
+  "period_id": "2026-03-01T00:00:00Z",
+  "period_root": "fc8c39559c4abdd6b1e5a7dd638f8701ea547bd219ba16d3583e6fff008bd4cb",
+  "buckets": [
+   {
+    "actor": "mallory",
+    "index": 0,
+    "root": "3e2a7f83dc309ab58fd1253174964768df313f411f373f0183e325cefec98299",
+    "count": 1
+   }
+  ],
+  "from_seq": 1,
+  "to_seq": 1,
+  "total": 1,
+  "signature": "2c773c6c9b7251a9fbad8db3da010fc330f6bdbbeed7100c1ce601f6e09cf299",
+  "kind": "commit",
+  "prev": "f0c6cec930f9086646062b0415b5276114d25b17bae7b35b6e2814688683cb27",
+  "hash": "10064624438848f47b2a3d5ab4f08d9f48cde89781c3079fdd697450b42e6497"
+ }
+]

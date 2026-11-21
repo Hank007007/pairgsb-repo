@@ -11,15 +11,24 @@ from __future__ import annotations
 import hashlib
 import json
 
-EMPTY_BUCKET_ROOT = "0" * 64
+EMPTY_BUCKET_ROOT = hashlib.sha256(b"SWB0-empty").hexdigest()
 
 _LEAF_TAG = b"SWB1"
 _NODE_TAG = b"SWN1"
 
 
-def bucket_leaf_hash(record: dict) -> str:
-    """Return the leaf digest for one event record."""
-    payload = json.dumps(record)
+def _canonical(record: dict) -> str:
+    return json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def bucket_leaf_hash(record: dict, count: int) -> str:
+    """Return the leaf digest for one event record.
+
+    The digest covers the record's semantic content (canonically
+    serialized, so key order and escaping do not matter) together with
+    the bucket's record count.
+    """
+    payload = _canonical({"count": int(count), "record": record})
     return hashlib.sha256(_LEAF_TAG + payload.encode("utf-8")).hexdigest()
 
 
@@ -46,7 +55,11 @@ def _levels(hashes: list[str]) -> list[list[str]]:
 
 
 def _ordered(records: list[dict]) -> list[dict]:
-    return sorted(records, key=lambda record: str(record["seq"]))
+    ordered = sorted(records, key=lambda record: int(record["seq"]))
+    for previous, current in zip(ordered, ordered[1:]):
+        if int(previous["seq"]) == int(current["seq"]):
+            raise ValueError(f"duplicate seq {current['seq']!r} in bucket")
+    return ordered
 
 
 def build_bucket(records: list[dict]) -> dict:
@@ -59,7 +72,7 @@ def build_bucket(records: list[dict]) -> dict:
         return {"root": EMPTY_BUCKET_ROOT, "count": 0, "records": []}
 
     ordered = _ordered(records)
-    hashes = [bucket_leaf_hash(record) for record in ordered]
+    hashes = [bucket_leaf_hash(record, len(ordered)) for record in ordered]
     root = _levels(hashes)[-1][0]
     return {"root": root, "count": len(ordered), "records": ordered}
 
@@ -90,12 +103,16 @@ def verify_leaf_proof(leaf_hash: str, proof: list[dict], root: str) -> bool:
     """Fold a sibling path and compare it with the expected root."""
     acc = leaf_hash
     for item in proof:
+        if not isinstance(item, dict):
+            return False
         sibling = item.get("hash", "")
         try:
             if item.get("side") == "left":
                 acc = _node_hash(sibling, acc)
-            else:
+            elif item.get("side") == "right":
                 acc = _node_hash(acc, sibling)
-        except ValueError:
+            else:
+                return False
+        except (TypeError, ValueError):
             return False
     return acc == root

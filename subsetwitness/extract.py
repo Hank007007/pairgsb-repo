@@ -10,38 +10,63 @@ from __future__ import annotations
 import copy
 import hashlib
 import hmac
-from datetime import datetime
+import json
+from datetime import datetime, timezone
 
 from .bucket import bucket_leaf_hash, build_bucket, build_buckets, leaf_proof
 from .dir import build_directory, prove_bucket
 
 
 def parse_time(value: str) -> datetime:
-    return datetime.fromisoformat(value)
+    """Parse an ISO-8601 timestamp and normalise it to an instant.
+
+    A ``Z`` suffix and numeric offsets are honoured.  Timestamps with
+    no zone suffix are read under the declared UTC convention, so the
+    same instant selects the same records however it was written.
+    """
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    moment = datetime.fromisoformat(text)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment
 
 
 def in_window(ts: str, since: datetime, until: datetime) -> bool:
     """Return True when ``ts`` falls in ``[since, until)``."""
-    try:
-        moment = parse_time(ts)
-        return since <= moment <= until
-    except (ValueError, TypeError):
-        return False
+    moment = parse_time(ts)
+    return since <= moment < until
 
 
 def filter_events(records: list[dict], since: str, until: str) -> list[dict]:
-    """Select event records whose timestamp is inside the window."""
+    """Select event records whose timestamp is inside the window.
+
+    A record whose timestamp cannot be interpreted is an error, never
+    silently dropped.
+    """
     start = parse_time(since)
     end = parse_time(until)
-    return [
-        record
-        for record in records
-        if record.get("kind", "event") == "event" and in_window(record.get("ts", ""), start, end)
-    ]
+    selected = []
+    for record in records:
+        if record.get("kind", "event") != "event":
+            continue
+        ts = record.get("ts")
+        if not isinstance(ts, str):
+            raise ValueError(f"event seq={record.get('seq')!r} carries no usable timestamp")
+        try:
+            moment = parse_time(ts)
+        except ValueError:
+            raise ValueError(
+                f"event seq={record.get('seq')!r} has unparseable timestamp {ts!r}"
+            ) from None
+        if start <= moment < end:
+            selected.append(record)
+    return selected
 
 
 def period_id_for(ts: str, window_hours: int = 1) -> str:
-    moment = parse_time(ts)
+    moment = parse_time(ts).astimezone(timezone.utc)
     floored = moment.replace(minute=0, second=0, microsecond=0)
     hours = floored.hour - (floored.hour % window_hours)
     start = floored.replace(hour=hours)
@@ -80,8 +105,6 @@ SIGNED_FIELDS = ("period_id", "period_root", "buckets", "from_seq", "to_seq", "t
 
 
 def canonical_body(body: dict) -> str:
-    import json
-
     return json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
@@ -107,7 +130,7 @@ def extract(
     buckets = period["buckets"]
     bucket = buckets.get(actor) or build_bucket([])
     ordered = bucket["records"]
-    hashes = [bucket_leaf_hash(record) for record in ordered]
+    hashes = [bucket_leaf_hash(record, bucket["count"]) for record in ordered]
 
     leaves = [
         {
@@ -132,7 +155,7 @@ def extract(
     return {
         "version": 1,
         "actor": actor,
-        "period_id": period_id_for(since),
+        "period_id": period_id or period_id_for(since),
         "window": {"since": since, "until": until},
         "bucket_root": bucket["root"],
         "count": bucket["count"],

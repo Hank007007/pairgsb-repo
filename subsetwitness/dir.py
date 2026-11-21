@@ -10,11 +10,10 @@ from __future__ import annotations
 import hashlib
 import json
 
-from .bucket import EMPTY_BUCKET_ROOT
-
 DIR_LEAF_TAG = b"SWD1"
 DIR_NODE_TAG = b"SWDN"
 EMPTY_DIR_ROOT = hashlib.sha256(b"SWD-empty").hexdigest()
+_PAD_TAG = b"SWD0-pad"
 
 
 def _node_hash(left_hex: str, right_hex: str) -> str:
@@ -37,8 +36,12 @@ def dir_leaf_hash(bucket_root: str, count: int) -> str:
 
 
 def empty_slot_hash() -> str:
-    """Digest used for an unused directory slot."""
-    return dir_leaf_hash(EMPTY_BUCKET_ROOT, 0)
+    """Digest used for an unused directory slot.
+
+    Padding uses its own domain tag so a padding slot can never be
+    confused with the digest of a real bucket.
+    """
+    return hashlib.sha256(_PAD_TAG).hexdigest()
 
 
 def next_pow2(n: int) -> int:
@@ -83,15 +86,15 @@ def build_directory(buckets: dict[str, dict]) -> tuple[str, list[dict]]:
 def prove_bucket(buckets: dict[str, dict], actor: str) -> dict:
     """Return the directory proof for one actor's bucket.
 
-    An actor with no events is placed at the slot that completes the
-    directory to a power of two.
+    Only real buckets are provable.  An actor with no bucket in the
+    period is rejected; padding slots are never provable.
     """
+    if actor not in buckets:
+        raise KeyError(f"no bucket for actor {actor!r}")
     actors = sorted(buckets)
     root, entries = build_directory(buckets)
-    index = actors.index(actor) if actor in buckets else len(entries)
+    index = actors.index(actor)
     size = next_pow2(max(len(entries), 1))
-    if index >= size:
-        raise KeyError(f"no bucket for actor {actor!r}")
 
     leaves = [dir_leaf_hash(entry["root"], entry["count"]) for entry in entries]
     levels = _padded_levels(leaves, size)
@@ -114,24 +117,49 @@ def prove_bucket(buckets: dict[str, dict], actor: str) -> dict:
     }
 
 
-def verify_bucket_proof(leaf_hash: str, proof: list[dict], expected_root: str) -> bool:
+def verify_bucket_proof(
+    leaf_hash: str,
+    proof: list[dict],
+    expected_root: str,
+    index: int | None = None,
+    n_buckets: int | None = None,
+) -> bool:
     """Check a directory proof against the expected period root.
 
-    Entries are consumed in the order they are supplied, each sibling
-    being folded together with the running value.
+    Siblings are folded on the side each entry records.  When ``index``
+    and ``n_buckets`` are supplied, the proof length must match the
+    height implied by the padded bucket count, the index must point at
+    a real bucket (never a padding slot), and each entry's side must
+    agree with the index.
     """
-    if not proof:
-        return True
-
-    candidates = {leaf_hash}
-    for item in proof:
-        sibling = item.get("hash", "")
-        nxt: set[str] = set()
-        for node in candidates:
-            try:
-                nxt.add(_node_hash(node, sibling))
-                nxt.add(_node_hash(sibling, node))
-            except ValueError:
+    if index is not None and n_buckets is not None:
+        size = next_pow2(max(int(n_buckets), 1))
+        expected_length = size.bit_length() - 1 if size > 1 else 0
+        if not 0 <= int(index) < int(n_buckets):
+            return False
+        if len(proof) != expected_length:
+            return False
+        idx = int(index)
+        for item in proof:
+            if not isinstance(item, dict):
                 return False
-        candidates = nxt
-    return expected_root in candidates
+            expected_side = "left" if idx % 2 == 1 else "right"
+            if item.get("side") != expected_side:
+                return False
+            idx //= 2
+
+    acc = leaf_hash
+    for item in proof:
+        if not isinstance(item, dict):
+            return False
+        sibling = item.get("hash", "")
+        try:
+            if item.get("side") == "left":
+                acc = _node_hash(sibling, acc)
+            elif item.get("side") == "right":
+                acc = _node_hash(acc, sibling)
+            else:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return acc == expected_root

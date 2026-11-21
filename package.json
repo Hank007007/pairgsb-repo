@@ -1,0 +1,15 @@
+{
+  "name": "sealferry-relay",
+  "version": "0.1.0",
+  "description": "Audit log shipping relay between business nodes and a central SIEM collector.",
+  "main": "src/daemon.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/daemon.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

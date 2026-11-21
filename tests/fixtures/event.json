@@ -1,0 +1,7 @@
+{
+  "fields": {
+    "order_id": "A1001",
+    "kind": "created"
+  },
+  "body": "{\"kind\":\"created\",\"order_id\":\"A1001\"}"
+}

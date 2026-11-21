@@ -1,6 +1,12 @@
 import { deflateRawSync } from "node:zlib";
 
-import { assemble, encodeSegment, parseHeader, splitSegments } from "./envelope.js";
+import {
+  BODY_COMPRESSION,
+  assemble,
+  encodeSegment,
+  parseHeader,
+  splitSegments,
+} from "./envelope.js";
 import { sign, verifyMac } from "./mac.js";
 import { inflateBody, parseClaims } from "./decompress.js";
 import {
@@ -11,8 +17,6 @@ import {
 } from "./claims.js";
 import { selectKey } from "./keys.js";
 import { reject } from "./errors.js";
-
-const DEFAULT_COMPRESSION = "deflate-raw";
 
 /**
  * Seal a claims object into a v2 cookie.
@@ -38,14 +42,14 @@ export function issue(claims, options = {}) {
 
   const headerSegment = encodeSegment(
     Buffer.from(
-      JSON.stringify({ kid, comp: DEFAULT_COMPRESSION }),
+      JSON.stringify({ kid, comp: BODY_COMPRESSION }),
       "utf8",
     ),
   );
   const bodySegment = encodeSegment(
     deflateRawSync(Buffer.from(JSON.stringify(claims), "utf8")),
   );
-  const macSegment = encodeSegment(sign(key.secret, bodySegment));
+  const macSegment = encodeSegment(sign(key.secret, headerSegment, bodySegment));
 
   return assemble(headerSegment, bodySegment, macSegment);
 }
@@ -67,11 +71,23 @@ export function read(cookie, options = {}) {
     throw reject("E_CONFIG", "a non-empty key ring is required");
   }
 
+  const nowMs = options.now ?? Date.now();
+  if (!Number.isFinite(nowMs)) {
+    throw reject("E_CONFIG", "now must be a finite number of milliseconds");
+  }
+
   const segments = splitSegments(cookie);
   const header = parseHeader(segments.headerBytes);
-  const key = selectKey(keys, header.kid);
+  const key = selectKey(keys, header.kid, Math.floor(nowMs / 1000));
 
-  if (!verifyMac(key.secret, segments.bodySegment, segments.macBytes)) {
+  if (
+    !verifyMac(
+      key.secret,
+      segments.headerSegment,
+      segments.bodySegment,
+      segments.macBytes,
+    )
+  ) {
     throw reject("E_MAC", "cookie signature does not match");
   }
 
@@ -80,7 +96,7 @@ export function read(cookie, options = {}) {
 
   validateClaimTypes(claims);
   assertAudience(claims, options.service);
-  checkLifetime(claims, options.now ?? Date.now());
+  checkLifetime(claims, nowMs);
 
-  return applyDefaults(claims);
+  return applyDefaults(claims, options.defaults);
 }

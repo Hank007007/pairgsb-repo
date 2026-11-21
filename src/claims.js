@@ -2,19 +2,62 @@ import { reject } from "./errors.js";
 
 const CLOCK_SKEW_SECONDS = 60;
 
-const SESSION_DEFAULTS = {
+const FORBIDDEN_CLAIM_NAMES = new Set(["__proto__", "constructor", "prototype"]);
+
+const SESSION_DEFAULTS = Object.freeze({
   iss: "login",
-  scopes: [],
-};
+  scopes: Object.freeze([]),
+});
+
+/**
+ * Reject forbidden member names anywhere in a decoded claims value.
+ *
+ * @param {unknown} value
+ */
+export function assertNoForbiddenClaimNames(value) {
+  const seen = new Set();
+  const pending = [value];
+
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === null || typeof current !== "object" || seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+
+    for (const name of Object.keys(current)) {
+      if (FORBIDDEN_CLAIM_NAMES.has(name)) {
+        throw reject("E_CLAIMS", `forbidden claim name ${name}`);
+      }
+      pending.push(current[name]);
+    }
+  }
+}
 
 /**
  * Complete a claims object with the library defaults.
  *
  * @param {Record<string, unknown>} claims
+ * @param {Record<string, unknown>} [defaults]
  * @returns {Record<string, unknown>}
  */
-export function applyDefaults(claims) {
-  return Object.assign(SESSION_DEFAULTS, claims);
+export function applyDefaults(claims, defaults = SESSION_DEFAULTS) {
+  if (defaults === null || typeof defaults !== "object" || Array.isArray(defaults)) {
+    throw reject("E_CLAIMS", "claim defaults must be an object");
+  }
+  assertNoForbiddenClaimNames(defaults);
+
+  const result = {};
+  for (const [name, value] of Object.entries(defaults)) {
+    if (!Object.hasOwn(claims, name)) {
+      result[name] = structuredClone(value);
+    }
+  }
+  for (const [name, value] of Object.entries(claims)) {
+    result[name] = value;
+  }
+
+  return result;
 }
 
 /**

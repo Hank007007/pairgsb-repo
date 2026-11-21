@@ -13,6 +13,10 @@ class DedupTable {
     this.seen = new Map();
   }
 
+  keyFor(entry) {
+    return `${entry.origin}\u0000${entry.epoch}\u0000${entry.seq}`;
+  }
+
   prune(now = this.now()) {
     const cutoff = now - this.retentionMs;
     for (const [key, at] of this.seen) {
@@ -22,7 +26,7 @@ class DedupTable {
 
   has(entry) {
     this.prune();
-    return this.seen.has(String(entry.seq));
+    return this.seen.has(this.keyFor(entry));
   }
 
   /**
@@ -32,7 +36,7 @@ class DedupTable {
   accept(entry) {
     const now = entry.at ?? this.now();
     this.prune(now);
-    const key = String(entry.seq);
+    const key = this.keyFor(entry);
     if (this.seen.has(key)) {
       this.seen.set(key, now);
       return false;

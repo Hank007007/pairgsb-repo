@@ -9,20 +9,39 @@ function cursorPathFor(stateDir, origin, epoch) {
 
 function writeCursor(cursorPath, cursor) {
   fs.mkdirSync(path.dirname(cursorPath), { recursive: true });
-  fs.writeFileSync(cursorPath, `${JSON.stringify(cursor)}\n`, 'utf8');
+  const existed = fs.existsSync(cursorPath);
+  const fd = fs.openSync(cursorPath, 'w');
+  try {
+    fs.writeFileSync(fd, `${JSON.stringify(cursor)}\n`, 'utf8');
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  if (!existed) {
+    try {
+      const dirFd = fs.openSync(path.dirname(cursorPath), 'r');
+      try {
+        fs.fsyncSync(dirFd);
+      } finally {
+        fs.closeSync(dirFd);
+      }
+    } catch {
+      // Directory fsync is not supported on every platform (e.g. Windows).
+    }
+  }
 }
 
 function freshCursor(stream) {
   const files = stream && Array.isArray(stream.files) ? stream.files : [];
-  const last = files.length > 0 ? files[files.length - 1] : null;
+  const first = files.length > 0 ? files[0] : null;
   return {
     version: 1,
     origin: stream ? stream.origin : null,
     epoch: stream ? stream.epoch : null,
-    segment: last ? last.name : null,
-    offset: last ? last.size : 0,
+    segment: first ? first.name : null,
+    offset: 0,
     nextSeq: 0,
-    ackedSeq: 0,
+    ackedSeq: -1,
     updatedAt: new Date().toISOString(),
   };
 }

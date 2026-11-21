@@ -8,7 +8,6 @@ const {
   hmac,
   parseManifest,
   signingInput,
-  withoutSignature,
 } = require('../protocol/manifest');
 
 class VerifyError extends Error {
@@ -87,7 +86,7 @@ function checkShape(manifest) {
   }
 }
 
-function verifySignature(manifest, rawText, keyring) {
+function verifySignature(manifest, keyring) {
   const entry = keyring && keyring[manifest.keyId];
   if (!entry) {
     throw new VerifyError(`unknown keyId ${manifest.keyId}`, {
@@ -98,11 +97,16 @@ function verifySignature(manifest, rawText, keyring) {
     });
   }
 
-  const parsed = JSON.parse(rawText);
-  const input = JSON.stringify(withoutSignature(parsed));
-  const expected = hmac(entry.secret, input);
-  const signature = manifest[SIGNATURE_FIELD];
+  if (Array.isArray(entry.origins) && !entry.origins.includes(manifest.origin)) {
+    throw new VerifyError(`key ${manifest.keyId} is not authorised for origin ${manifest.origin}`, {
+      code: 'origin_not_authorised',
+      field: 'origin',
+      origin: manifest.origin,
+      keyId: manifest.keyId,
+    });
+  }
 
+  const signature = manifest[SIGNATURE_FIELD];
   if (typeof signature !== 'string' || signature === '') {
     throw new VerifyError('manifest signature is missing', {
       code: 'signature_missing',
@@ -112,7 +116,10 @@ function verifySignature(manifest, rawText, keyring) {
     });
   }
 
-  if (signature === expected) {
+  const expected = hmac(entry.secret, signingInput(manifest));
+  const given = Buffer.from(signature, 'utf8');
+  const wanted = Buffer.from(expected, 'utf8');
+  if (given.length === wanted.length && crypto.timingSafeEqual(given, wanted)) {
     return manifest;
   }
 
@@ -149,7 +156,7 @@ function readManifest(rawText) {
 function verifyManifest(rawText, options = {}) {
   const keyring = options.keyring || {};
   const manifest = readManifest(rawText);
-  return verifySignature(manifest, rawText, keyring);
+  return verifySignature(manifest, keyring);
 }
 
 function verifyPayload(manifest, payload) {
@@ -188,4 +195,5 @@ module.exports = {
   signingInput,
   verifyManifest,
   verifyPayload,
+  verifySignature,
 };

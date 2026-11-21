@@ -16,7 +16,15 @@ class DeliveryError extends Error {
     this.status = details.status;
     this.body = details.body;
     this.batch = details.batch;
+    this.cause = details.cause;
   }
+}
+
+const DEFAULT_RETRIES = 3;
+const DEFAULT_RETRY_DELAY_MS = 200;
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function request(urlString, options, payload) {
@@ -89,6 +97,43 @@ function buildEnvelope(batch, keyId, secret) {
 }
 
 /**
+ * Sends one batch, retrying on 5xx responses and transport failures with
+ * exponential backoff. A 4xx response is returned immediately: it will not
+ * succeed on retry. Throws DeliveryError when transport keeps failing.
+ */
+async function sendBatch(collectorUrl, envelope, options = {}) {
+  const retries = Number.isInteger(options.retries) ? options.retries : DEFAULT_RETRIES;
+  const retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+  let lastResponse = null;
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    if (attempt > 0) await delay(retryDelayMs * 2 ** (attempt - 1));
+    try {
+      const response = options.fetchImpl
+        ? await options.fetchImpl(collectorUrl, envelope, { batch: options.batch })
+        : await postBatch(collectorUrl, envelope, { timeoutMs: options.timeoutMs });
+      if (response && response.status >= 200 && response.status < 300) return response;
+      lastResponse = response;
+      lastError = null;
+      if (response && response.status >= 400 && response.status < 500) break;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  if (lastError) {
+    if (lastError instanceof DeliveryError) throw lastError;
+    throw new DeliveryError(`collector request failed: ${lastError.message}`, {
+      code: 'connection_error',
+      batch: options.batch,
+      cause: lastError,
+    });
+  }
+  return lastResponse;
+}
+
+/**
  * Performs one shipping pass over every stream in the spool directory.
  * Each stream is advanced at most one batch per pass.
  */
@@ -102,6 +147,8 @@ async function shipOnce(options) {
     limit,
     fetchImpl,
     timeoutMs,
+    retries,
+    retryDelayMs,
   } = options;
 
   const streams = listStreams(spoolDir);
@@ -114,14 +161,13 @@ async function shipOnce(options) {
     if (!batch) continue;
 
     const envelope = buildEnvelope(batch, keyId, secret);
-    advance(cursorPath, cursor, batch.position);
-
-    let response;
-    if (fetchImpl) {
-      response = await fetchImpl(collectorUrl, envelope, { batch });
-    } else {
-      response = await postBatch(collectorUrl, envelope, { timeoutMs });
-    }
+    const response = await sendBatch(collectorUrl, envelope, {
+      batch,
+      fetchImpl,
+      timeoutMs,
+      retries,
+      retryDelayMs,
+    });
 
     if (!response || response.status < 200 || response.status >= 300) {
       throw new DeliveryError(
@@ -133,6 +179,8 @@ async function shipOnce(options) {
         },
       );
     }
+
+    advance(cursorPath, cursor, batch.position);
 
     results.push({
       origin: batch.origin,

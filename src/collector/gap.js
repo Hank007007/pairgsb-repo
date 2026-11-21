@@ -1,56 +1,71 @@
 'use strict';
 
-function emptyStream(origin) {
+const { streamKey } = require('../protocol/manifest');
+
+function emptyStream(origin, epoch) {
   return {
     origin,
-    lastSeq: null,
+    epoch,
     watermark: -1,
-    hasGap: false,
-    gapFrom: null,
-    gapTo: null,
+    pending: new Set(),
   };
 }
 
 /**
- * Keeps the highest sequence number observed per origin and the accepted
- * watermark that the collector reports back to the agent.
+ * Missing ranges for a stream: the sequence numbers between the contiguous
+ * watermark and the highest stored record that have not been stored yet.
+ * Ranges are maximal and inclusive on both ends.
+ */
+function gapRanges(stream) {
+  if (stream.pending.size === 0) return [];
+  const stored = Array.from(stream.pending).sort((a, b) => a - b);
+  const ranges = [];
+  let from = stream.watermark + 1;
+  for (const seq of stored) {
+    if (seq > from) ranges.push({ from, to: seq - 1 });
+    from = seq + 1;
+  }
+  return ranges;
+}
+
+/**
+ * Tracks, per (origin, epoch), the contiguous accepted watermark and the
+ * records stored beyond it, so missing regions can be reported as ranges and
+ * cleared as they are filled.
  */
 class GapTracker {
   constructor() {
     this.streams = new Map();
   }
 
-  streamFor(origin) {
-    let stream = this.streams.get(origin);
+  streamFor(origin, epoch) {
+    const key = streamKey(origin, epoch);
+    let stream = this.streams.get(key);
     if (!stream) {
-      stream = emptyStream(origin);
-      this.streams.set(origin, stream);
+      stream = emptyStream(origin, epoch);
+      this.streams.set(key, stream);
     }
     return stream;
   }
 
   /**
-   * Feeds an arrived sequence number to the tracker. Returns a summary of what
-   * the tracker now believes about the stream.
+   * Feeds a newly stored sequence number to the tracker. Returns a summary of
+   * what the tracker now believes about the stream.
    */
-  observe(origin, seq) {
-    const stream = this.streamFor(origin);
+  observe(origin, epoch, seq) {
+    const stream = this.streamFor(origin, epoch);
 
-    if (stream.lastSeq !== null && seq <= stream.lastSeq) {
+    if (seq <= stream.watermark || stream.pending.has(seq)) {
       return this.snapshot(stream, { accepted: false, reason: 'out_of_order' });
     }
 
-    if (stream.lastSeq !== null && seq > stream.lastSeq + 1) {
-      stream.hasGap = true;
-      if (stream.gapFrom === null) {
-        stream.gapFrom = stream.lastSeq + 1;
-      }
-      stream.gapTo = seq - 1;
-    }
-
-    stream.lastSeq = seq;
-    if (!stream.hasGap) {
+    if (seq === stream.watermark + 1) {
       stream.watermark = seq;
+      while (stream.pending.delete(stream.watermark + 1)) {
+        stream.watermark += 1;
+      }
+    } else {
+      stream.pending.add(seq);
     }
 
     return this.snapshot(stream, { accepted: true });
@@ -59,34 +74,44 @@ class GapTracker {
   snapshot(stream, extra = {}) {
     return {
       origin: stream.origin,
-      lastSeq: stream.lastSeq,
+      epoch: stream.epoch,
       watermark: stream.watermark,
-      hasGap: stream.hasGap,
+      gaps: gapRanges(stream),
       ...extra,
     };
   }
 
-  watermarkFor(origin) {
-    return this.streamFor(origin).watermark;
+  watermarkFor(origin, epoch) {
+    const key = streamKey(origin, epoch);
+    const stream = this.streams.get(key);
+    return stream ? stream.watermark : -1;
+  }
+
+  gapsFor(origin, epoch) {
+    const key = streamKey(origin, epoch);
+    const stream = this.streams.get(key);
+    return stream ? gapRanges(stream) : [];
   }
 
   /**
-   * A human-readable description of what remains missing for `origin`.
+   * A human-readable, actionable description of what remains missing.
    */
-  describe(origin) {
-    const stream = this.streamFor(origin);
-    if (!stream.hasGap) return `origin ${origin} has no gaps`;
-    return `origin ${origin} has a gap after seq ${stream.gapFrom} (watermark ${stream.watermark})`;
+  describe(origin, epoch) {
+    const ranges = this.gapsFor(origin, epoch);
+    if (ranges.length === 0) return `origin ${origin} has no gaps`;
+    const missing = ranges.map((range) => `${range.from}..${range.to}`).join(', ');
+    return `origin ${origin} missing seq ${missing}`;
   }
 
   report() {
-    return Array.from(this.streams.keys()).map((origin) => {
-      const stream = this.streams.get(origin);
+    return Array.from(this.streams.values()).map((stream) => {
+      const gaps = gapRanges(stream);
       return {
-        origin,
+        origin: stream.origin,
+        epoch: stream.epoch,
         watermark: stream.watermark,
-        lastSeq: stream.lastSeq,
-        hasGap: stream.hasGap,
+        hasGap: gaps.length > 0,
+        gaps,
       };
     });
   }
@@ -95,4 +120,5 @@ class GapTracker {
 module.exports = {
   GapTracker,
   emptyStream,
+  gapRanges,
 };

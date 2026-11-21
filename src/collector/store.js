@@ -52,6 +52,39 @@ class Store {
   countFor(origin, epoch) {
     return this.recordsFor(origin, epoch).length;
   }
+
+  /**
+   * Returns every stored entry across all (origin, epoch) streams. Used to
+   * rebuild deduplication and gap state after a collector restart.
+   */
+  entries() {
+    let dirs;
+    try {
+      dirs = fs.readdirSync(this.rootDir, { withFileTypes: true });
+    } catch (err) {
+      if (err.code === 'ENOENT') return [];
+      throw err;
+    }
+    const out = [];
+    for (const dir of dirs) {
+      if (!dir.isDirectory()) continue;
+      let origin;
+      try {
+        origin = decodeURIComponent(dir.name);
+      } catch {
+        continue;
+      }
+      for (const file of fs.readdirSync(path.join(this.rootDir, dir.name))) {
+        if (!file.endsWith('.ndjson')) continue;
+        const epoch = Number(file.slice(0, -'.ndjson'.length));
+        if (!Number.isInteger(epoch) || epoch < 0) continue;
+        for (const entry of this.recordsFor(origin, epoch)) {
+          out.push(entry);
+        }
+      }
+    }
+    return out;
+  }
 }
 
 module.exports = { Store };

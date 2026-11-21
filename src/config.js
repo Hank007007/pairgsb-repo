@@ -11,7 +11,7 @@ function loadKeyring(filePath) {
   const keyring = {};
   for (const [keyId, entry] of Object.entries(data)) {
     if (typeof entry === 'string') {
-      keyring[keyId] = { secret: entry, origins: [] };
+      keyring[keyId] = { secret: entry };
       continue;
     }
     keyring[keyId] = {

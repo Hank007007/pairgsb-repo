@@ -56,19 +56,12 @@ function listStreams(spoolDir) {
     const stat = fs.statSync(path.join(spoolDir, entry.name));
     stream.files.push({ name: parsed.name, index: parsed.index, size: stat.size });
   }
-  return Array.from(streams.values());
-}
-
-function truncateLine(line, maxRecordBytes) {
-  if (Buffer.byteLength(line, 'utf8') <= maxRecordBytes) return line;
-  return Buffer.from(line, 'utf8').subarray(0, maxRecordBytes).toString('utf8');
-}
-
-function lineParts(buffer, startOffset) {
-  const text = buffer.subarray(startOffset).toString('utf8');
-  const parts = text.split('\n');
-  parts.pop();
-  return parts;
+  const ordered = Array.from(streams.values());
+  for (const stream of ordered) {
+    stream.files.sort((a, b) => a.index - b.index);
+  }
+  ordered.sort((a, b) => (a.origin === b.origin ? a.epoch - b.epoch : a.origin < b.origin ? -1 : 1));
+  return ordered;
 }
 
 /**
@@ -107,32 +100,24 @@ function readBatch(options) {
     nextSeq: firstSeq,
   };
 
-  for (let fileIndex = startIndex; fileIndex < stream.files.length; fileIndex += 1) {
-    if (records.length >= limit) break;
+  for (let fileIndex = startIndex; fileIndex < stream.files.length && records.length < limit; fileIndex += 1) {
     const file = stream.files[fileIndex];
     const filePath = path.join(spoolDir, file.name);
     const buffer = fs.readFileSync(filePath);
-    let offset = 0;
-    if (file.name === position.segment) {
-      offset = Math.min(position.offset, buffer.length);
-    }
-    const parts = lineParts(buffer, offset);
+    let offset = file.name === position.segment ? Math.min(position.offset, buffer.length) : 0;
 
-    if (parts.length === 0) {
-      if (fileIndex + 1 < stream.files.length) {
-        position = {
-          segment: stream.files[fileIndex + 1].name,
-          offset: 0,
-          nextSeq: firstSeq + records.length,
-        };
+    while (records.length < limit && offset < buffer.length) {
+      const newline = buffer.indexOf(0x0a, offset);
+      const end = newline === -1 ? buffer.length : newline;
+      const size = end - offset;
+      if (size > maxRecordBytes) {
+        throw new SpoolError(
+          `record in ${file.name} at byte offset ${offset} is ${size} bytes, over the ${maxRecordBytes} byte limit`,
+          { code: 'record_too_large', file: file.name, offset },
+        );
       }
-      continue;
-    }
-
-    for (const part of parts) {
-      if (records.length >= limit) break;
-      records.push(truncateLine(part, maxRecordBytes));
-      offset += Buffer.byteLength(part, 'utf8') + 1;
+      records.push(buffer.subarray(offset, end).toString('utf8'));
+      offset = newline === -1 ? buffer.length : newline + 1;
       position = {
         segment: file.name,
         offset,

@@ -7,8 +7,12 @@ function tenantScope(tenant) {
   return { kind: 'cmp', path: 'tenant', op: 'eq', value: tenant };
 }
 
+function escapeLike(text) {
+  return String(text).replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
 function likePattern(op, value) {
-  const text = String(value);
+  const text = escapeLike(value);
   if (op === 'co') return `%${text}%`;
   if (op === 'sw') return `${text}%`;
   if (op === 'ew') return `%${text}`;
@@ -58,16 +62,6 @@ function compile(ast, tenant) {
     throw badRequest('invalidFilter', 'missing tenant');
   }
   const client = compileSubtree(ast);
-  if (client.kind === 'and') {
-    return { kind: 'and', items: [tenantScope(tenant), ...client.items] };
-  }
-  if (client.kind === 'or') {
-    const [first, ...rest] = client.items;
-    return {
-      kind: 'or',
-      items: [{ kind: 'and', items: [tenantScope(tenant), first] }, ...rest],
-    };
-  }
   return { kind: 'and', items: [tenantScope(tenant), client] };
 }
 

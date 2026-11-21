@@ -38,4 +38,27 @@ function parseEntityTag(value) {
   return withoutWeak.replace(/^"|"$/g, '');
 }
 
-module.exports = { ROUTES, matchRoute, parseEntityTag };
+function parseEntityTags(value) {
+  if (typeof value !== 'string') return [];
+  const tags = [];
+  let i = 0;
+  while (i < value.length) {
+    while (i < value.length && /[\s,]/.test(value[i])) i += 1;
+    if (i >= value.length) break;
+    if (value.startsWith('W/', i)) i += 2;
+    if (value[i] === '"') {
+      i += 1;
+      const start = i;
+      while (i < value.length && value[i] !== '"') i += 1;
+      tags.push(value.slice(start, i));
+      if (i < value.length) i += 1;
+      continue;
+    }
+    const start = i;
+    while (i < value.length && value[i] !== ',') i += 1;
+    tags.push(value.slice(start, i).trim());
+  }
+  return tags.filter((tag) => tag.length > 0);
+}
+
+module.exports = { ROUTES, matchRoute, parseEntityTag, parseEntityTags };

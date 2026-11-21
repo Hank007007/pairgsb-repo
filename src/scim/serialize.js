@@ -71,10 +71,8 @@ function baseResource(record, resourceType) {
 
 function toScimUser(record, actor, options = {}) {
   const full = { ...baseResource(record, 'User'), ...clone(record.attributes) };
-  if (options.attributes || options.excludedAttributes) {
-    return full;
-  }
-  return trimByScope(actor, 'User', full);
+  const trimmed = trimByScope(actor, 'User', full);
+  return applyProjection(trimmed, options);
 }
 
 function toScimGroup(record, actor, options = {}) {

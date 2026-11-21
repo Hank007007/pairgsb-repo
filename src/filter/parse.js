@@ -5,6 +5,26 @@ const { badRequest } = require('../util/errors');
 const OPERATORS = new Set(['eq', 'ne', 'co', 'sw', 'ew', 'gt', 'ge', 'lt', 'le']);
 const PR = 'pr';
 
+function readQuoted(text, start) {
+  const quote = text[start];
+  let i = start + 1;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '\\') {
+      if (i + 1 >= text.length) {
+        throw badRequest('invalidFilter', 'unterminated string literal');
+      }
+      i += 2;
+      continue;
+    }
+    if (ch === quote) {
+      return { raw: text.slice(start, i + 1), next: i + 1 };
+    }
+    i += 1;
+  }
+  throw badRequest('invalidFilter', 'unterminated string literal');
+}
+
 function tokenize(input) {
   const tokens = [];
   const text = String(input);
@@ -21,18 +41,9 @@ function tokenize(input) {
       continue;
     }
     if (ch === '"' || ch === "'") {
-      const start = i;
-      let j = i + 1;
-      while (j < text.length && text[j] !== ch) {
-        j += 1;
-      }
-      if (j >= text.length) {
-        tokens.push({ type: 'string', value: text.slice(start), pos: start });
-        i = text.length;
-        continue;
-      }
-      tokens.push({ type: 'string', value: text.slice(start, j + 1), pos: start });
-      i = j + 1;
+      const literal = readQuoted(text, i);
+      tokens.push({ type: 'string', value: literal.raw, pos: i });
+      i = literal.next;
       continue;
     }
     let j = i;
@@ -46,15 +57,21 @@ function tokenize(input) {
 }
 
 function parseValue(raw) {
-  if (raw.startsWith('"') || raw.startsWith("'")) {
-    const match = /^"(.*)"$/.exec(raw) || /^'(.*)'$/.exec(raw);
-    if (!match) {
+  if (raw.startsWith('"')) {
+    try {
+      return JSON.parse(raw);
+    } catch (err) {
       throw badRequest('invalidFilter', 'malformed string literal');
     }
-    return match[1];
+  }
+  if (raw.startsWith("'")) {
+    return raw.slice(1, -1).replace(/\\(['\\])/g, '$1');
   }
   if (/^(true|false)$/i.test(raw)) {
     return raw.toLowerCase() === 'true';
+  }
+  if (/^null$/i.test(raw)) {
+    return null;
   }
   if (/^-?\d+(\.\d+)?$/.test(raw)) {
     return Number(raw);

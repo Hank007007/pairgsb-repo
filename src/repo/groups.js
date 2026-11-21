@@ -36,7 +36,7 @@ class GroupRepo {
 
   search(condition) {
     return Array.from(this.rows.values())
-      .map((row) => ({ ...row, ...row.attributes }))
+      .map((row) => ({ ...row.attributes, ...row }))
       .filter((row) => matches(row, condition));
   }
 

@@ -32,6 +32,10 @@ function forbidden(scimType, detail) {
   return new ScimError(403, scimType, detail);
 }
 
+function preconditionFailed(detail) {
+  return new ScimError(412, 'preconditionFailed', detail);
+}
+
 function notFound(detail) {
   return new ScimError(404, null, detail);
 }
@@ -41,5 +45,6 @@ module.exports = {
   badRequest,
   unauthorized,
   forbidden,
+  preconditionFailed,
   notFound,
 };

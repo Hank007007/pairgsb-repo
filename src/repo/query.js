@@ -60,7 +60,14 @@ function compareOrdered(left, right) {
 
 function likePatternToRegExp(pattern) {
   let source = '^';
-  for (const ch of String(pattern)) {
+  const text = String(pattern);
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '\\' && i + 1 < text.length) {
+      i += 1;
+      source += text[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      continue;
+    }
     if (ch === '%') {
       source += '.*';
     } else if (ch === '_') {

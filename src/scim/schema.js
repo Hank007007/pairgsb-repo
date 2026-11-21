@@ -41,14 +41,22 @@ function schemaFor(resourceType) {
   return resourceType === 'Group' ? GROUP_ATTRIBUTES : USER_ATTRIBUTES;
 }
 
-function sensitiveAttributeOf(resourceType, attribute) {
+function schemaKey(resourceType, attribute) {
   const schema = schemaFor(resourceType);
-  const definition = schema[attribute];
+  if (Object.prototype.hasOwnProperty.call(schema, attribute)) return attribute;
+  const wanted = String(attribute).toLowerCase();
+  return Object.keys(schema).find((key) => key.toLowerCase() === wanted);
+}
+
+function sensitiveAttributeOf(resourceType, attribute) {
+  const key = schemaKey(resourceType, attribute);
+  const schema = schemaFor(resourceType);
+  const definition = key === undefined ? null : schema[key];
   return definition && definition.sensitive ? definition.sensitive : null;
 }
 
 function isKnownAttribute(resourceType, attribute) {
-  return Object.prototype.hasOwnProperty.call(schemaFor(resourceType), attribute);
+  return schemaKey(resourceType, attribute) !== undefined;
 }
 
 module.exports = {

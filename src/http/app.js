@@ -2,7 +2,7 @@
 
 const { URL } = require('node:url');
 const { verify, bearerToken, canWrite } = require('../auth/token');
-const { matchRoute, parseEntityTag } = require('./router');
+const { matchRoute, parseEntityTags } = require('./router');
 const { UserRepo } = require('../repo/users');
 const { GroupRepo } = require('../repo/groups');
 const { parse } = require('../filter/parse');
@@ -14,6 +14,7 @@ const {
   ScimError,
   badRequest,
   forbidden,
+  preconditionFailed,
   notFound,
 } = require('../util/errors');
 
@@ -139,10 +140,11 @@ function evaluatePrecondition(headerValue, record) {
   if (headerValue === undefined) {
     return { present: false, matched: true, presented: null };
   }
-  const presented = parseEntityTag(headerValue);
+  const presented = parseEntityTags(headerValue);
+  const current = versionOf(record);
   return {
     present: true,
-    matched: presented === versionOf(record),
+    matched: presented.includes('*') || presented.includes(current),
     presented,
   };
 }
@@ -160,6 +162,9 @@ function createApp(options = {}) {
         const route = matchRoute(req.method, url.pathname);
         if (!route) {
           throw notFound('unknown endpoint');
+        }
+        if (route.tenant !== actor.tenant) {
+          throw forbidden('tenantMismatch', 'token tenant does not match request tenant');
         }
         app.log({
           sub: actor.sub,
@@ -193,13 +198,13 @@ async function listResources(repo, resourceType, searchParams, actor) {
   const { startIndex, count } = parsePagination(searchParams);
   const filterText = searchParams.get('filter');
   let matched;
-  if (filterText) {
+  if (filterText !== null) {
     const ast = parse(filterText);
     matched = repo.search(compile(ast, actor.tenant));
   } else {
     matched = repo.list(actor.tenant);
   }
-  const totalResults = count > MAX_COUNT ? count : matched.length;
+  const totalResults = matched.length;
   const pageSize = Math.min(count, MAX_COUNT);
   const page = matched.slice(startIndex - 1, startIndex - 1 + pageSize);
   const resources = page.map((row) => serialize(row, resourceType, actor, projection));
@@ -259,6 +264,7 @@ async function handleUsers(app, route, searchParams, req, actor) {
         presented: guard.presented,
         current: versionOf(record),
       });
+      throw preconditionFailed('If-Match does not match current version');
     }
     const payload = await readBody(req);
     const operations = payload && (payload.Operations || payload.operations);
@@ -280,6 +286,7 @@ async function handleUsers(app, route, searchParams, req, actor) {
         presented: guard.presented,
         current: versionOf(record),
       });
+      throw preconditionFailed('If-Match does not match current version');
     }
     repo.delete(actor.tenant, record.id);
     return { status: 204, body: null, headers: {} };
@@ -331,6 +338,7 @@ async function handleGroups(app, route, searchParams, req, actor) {
         presented: guard.presented,
         current: versionOf(record),
       });
+      throw preconditionFailed('If-Match does not match current version');
     }
     const payload = await readBody(req);
     const operations = payload && (payload.Operations || payload.operations);
@@ -356,6 +364,7 @@ async function handleGroups(app, route, searchParams, req, actor) {
         presented: guard.presented,
         current: versionOf(record),
       });
+      throw preconditionFailed('If-Match does not match current version');
     }
     repo.delete(actor.tenant, record.id);
     return { status: 204, body: null, headers: {} };

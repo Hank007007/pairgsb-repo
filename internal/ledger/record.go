@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -154,6 +155,7 @@ type Ledger struct {
 	key             []byte
 	checkpointEvery int
 	records         []Record
+	mu              sync.RWMutex
 }
 
 // Open loads an existing ledger file, creating an empty ledger when the file
@@ -205,38 +207,93 @@ func LoadRecords(path string) ([]Record, error) {
 // Path returns the ledger file location.
 func (l *Ledger) Path() string { return l.path }
 
-// Records returns the records currently loaded in memory.
-func (l *Ledger) Records() []Record { return l.records }
+// Records returns a copy of the records currently loaded in memory.
+func (l *Ledger) Records() []Record {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return append([]Record(nil), l.records...)
+}
 
 // SetCheckpointEvery changes the checkpoint interval. A value of zero disables
 // checkpoint writing.
-func (l *Ledger) SetCheckpointEvery(n int) { l.checkpointEvery = n }
+func (l *Ledger) SetCheckpointEvery(n int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.checkpointEvery = n
+}
 
 // NextSeq returns the sequence number the next record is expected to carry.
 func (l *Ledger) NextSeq() int64 {
-	return int64(len(l.records)) + 1
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return nextSeq(l.records)
+}
+
+func nextSeq(records []Record) int64 {
+	var highest int64
+	for _, r := range records {
+		if r.Seq > highest {
+			highest = r.Seq
+		}
+	}
+	return highest + 1
 }
 
 func (l *Ledger) prevHash() string {
-	if len(l.records) == 0 {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return prevHash(l.records)
+}
+
+func prevHash(records []Record) string {
+	if len(records) == 0 {
 		return ""
 	}
-	return l.records[len(l.records)-1].Hash
+	return records[len(records)-1].Hash
 }
 
 // NewRecord allocates a record stamped with the next seq, the current chain
 // head, and the current time.
 func (l *Ledger) NewRecord(kind RecordKind) Record {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	return Record{
-		Seq:  l.NextSeq(),
+		Seq:  nextSeq(l.records),
 		Kind: kind,
 		At:   time.Now().UTC(),
-		Prev: l.prevHash(),
+		Prev: prevHash(l.records),
 	}
 }
 
 // Append writes a record to the ledger file and updates the in-memory view.
 func (l *Ledger) Append(r Record) error {
+	if r.Status != "" && !r.Status.Valid() {
+		return fmt.Errorf("record has unknown status %q", r.Status)
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	unlock, err := acquireLedgerLock(l.path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	records, err := LoadRecords(l.path)
+	if err != nil {
+		return err
+	}
+	l.records = records
+
+	if len(records) == 0 {
+		r.Seq = 1
+		r.Prev = ""
+	} else {
+		r.Seq = highestSeq(records) + 1
+		r.Prev = records[len(records)-1].Hash
+	}
+
 	r.Hash = HashRecord(r)
 	line, err := json.Marshal(r)
 	if err != nil {
@@ -253,11 +310,40 @@ func (l *Ledger) Append(r Record) error {
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("close ledger %s: %w", l.path, err)
 	}
-	l.records = append(l.records, r)
+	l.records = append(records, r)
 	if l.checkpointEvery > 0 && r.Seq%int64(l.checkpointEvery) == 0 {
 		return l.writeCheckpoint(r)
 	}
 	return nil
+}
+
+func highestSeq(records []Record) int64 {
+	var highest int64
+	for _, r := range records {
+		if r.Seq > highest {
+			highest = r.Seq
+		}
+	}
+	return highest
+}
+
+func acquireLedgerLock(path string) (func(), error) {
+	lockPath := path + ".lock"
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			f.Close()
+			return func() { _ = os.Remove(lockPath) }, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("lock ledger %s: %w", path, err)
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timed out waiting for ledger lock %s", lockPath)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 // CheckpointPath returns the sidecar file holding checkpoints for a ledger.

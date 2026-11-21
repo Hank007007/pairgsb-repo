@@ -2,15 +2,28 @@
 package source
 
 import (
-	"path/filepath"
+	"path"
 	"strings"
 )
 
 // Normalize turns a scanner-supplied path into the canonical form used when a
 // finding fingerprint is computed.
 func Normalize(p string) string {
-	if strings.TrimSpace(p) == "" {
+	p = strings.TrimSpace(p)
+	if p == "" {
 		return ""
 	}
-	return filepath.Clean(p)
+	p = strings.ReplaceAll(p, `\`, "/")
+	p = path.Clean(p)
+	return foldASCII(p)
+}
+
+func foldASCII(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + ('a' - 'A')
+		}
+	}
+	return string(b)
 }

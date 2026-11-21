@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -46,7 +47,11 @@ func (l *Ledger) Diff(current []Finding, baseline []Finding, now time.Time) (Dif
 
 	baselineSet := make(map[string]Finding, len(baseline))
 	for _, f := range baseline {
-		baselineSet[f.Fingerprint()] = f
+		fp := f.Fingerprint()
+		if _, ok := baselineSet[fp]; ok {
+			continue
+		}
+		baselineSet[fp] = f
 	}
 
 	for fp, f := range seen {
@@ -66,19 +71,53 @@ func (l *Ledger) Diff(current []Finding, baseline []Finding, now time.Time) (Dif
 			Severity:    f.Severity,
 			State:       string(eff),
 		})
-		if f.Severity.IsHigh() {
+	}
+
+	for fp, f := range baselineSet {
+		if _, still := seen[fp]; still {
+			continue
+		}
+		result.Resolved = append(result.Resolved, DiffEntry{
+			Fingerprint: fp,
+			RuleID:      f.RuleID,
+			File:        f.File,
+			Line:        f.Line,
+			Severity:    f.Severity,
+			State:       string(StatusFixed),
+		})
+	}
+
+	sortEntries(result.New)
+	sortEntries(result.Resolved)
+
+	for _, e := range result.New {
+		if e.Severity.IsHigh() && countsTowardsNewHigh(Status(e.State)) {
 			result.NewHigh++
 		}
 	}
 
-	for fp := range baselineSet {
-		if _, still := seen[fp]; still {
-			continue
-		}
-		delete(baselineSet, fp)
-	}
-
 	return result, nil
+}
+
+func sortEntries(entries []DiffEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		a, b := entries[i], entries[j]
+		if a.Fingerprint != b.Fingerprint {
+			return a.Fingerprint < b.Fingerprint
+		}
+		if a.File != b.File {
+			return a.File < b.File
+		}
+		return a.Line < b.Line
+	})
+}
+
+func countsTowardsNewHigh(s Status) bool {
+	switch s {
+	case StatusFixed, StatusWaived, Status("resolved"):
+		return false
+	}
+	return true
 }
 
 // RecordDiff writes the ledger records implied by a diff result.
@@ -88,13 +127,19 @@ func (l *Ledger) RecordDiff(result DiffResult, now time.Time) error {
 		if !state.Known {
 			continue
 		}
+		if state.Status == StatusFixed {
+			continue
+		}
 		r := l.NewRecord(KindResolved)
 		r.Fingerprint = e.Fingerprint
 		r.FindingID = FindingID(e.Fingerprint)
 		r.RuleID = e.RuleID
 		r.File = e.File
 		r.Line = e.Line
-		r.Status = StatusFixed
+		r.Status = state.Status
+		if err := TransitionAt(&r, StatusFixed, now); err != nil {
+			return fmt.Errorf("resolve %s from %q: %w", e.Fingerprint, state.Status, err)
+		}
 		if err := l.Append(r); err != nil {
 			return fmt.Errorf("append resolved record for %s: %w", e.Fingerprint, err)
 		}

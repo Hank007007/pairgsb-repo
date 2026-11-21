@@ -1,0 +1,25 @@
+# build output
+/scanctl
+/scanctl.exe
+/bin/
+/dist/
+
+# go test / coverage
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# local ledger data
+*.ledger.jsonl
+*.checkpoints.jsonl
+/tmp/
+
+# harness scaffolding
+.build.prompt.txt

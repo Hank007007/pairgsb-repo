@@ -27,7 +27,10 @@ type Store struct {
 	file    *os.File
 	records []Record
 	now     func() time.Time
+	usedTS  map[string]struct{}
 }
+
+const timestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
 
 // Option customises a Store.
 type Option func(*Store)
@@ -58,6 +61,10 @@ func Open(path string, opts ...Option) (*Store, error) {
 		return nil, err
 	}
 	s.records = records
+	s.usedTS = make(map[string]struct{}, len(records))
+	for _, rec := range records {
+		s.usedTS[rec.Time] = struct{}{}
+	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open log: %w", err)
@@ -130,10 +137,18 @@ func (s *Store) Append(actor, action, body string) (Record, error) {
 		prev = last.Hash
 	}
 
-	ts := s.now().UTC().Format(time.RFC3339)
+	ts := s.now().UTC()
+	stamp := ts.Format(timestampLayout)
+	for {
+		if _, used := s.usedTS[stamp]; !used {
+			break
+		}
+		ts = ts.Add(time.Nanosecond)
+		stamp = ts.Format(timestampLayout)
+	}
 	rec := Record{
 		Seq:    seq,
-		Time:   ts,
+		Time:   stamp,
 		Actor:  actor,
 		Action: action,
 		Body:   body,
@@ -152,6 +167,7 @@ func (s *Store) Append(actor, action, body string) (Record, error) {
 	if err := s.file.Sync(); err != nil {
 		return Record{}, fmt.Errorf("sync record: %w", err)
 	}
+	s.usedTS[stamp] = struct{}{}
 	s.records = append(s.records, rec)
 	return rec, nil
 }

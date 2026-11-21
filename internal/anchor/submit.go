@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"time"
@@ -50,8 +49,8 @@ func (s *Submitter) WithNow(now func() time.Time) *Submitter {
 // returns.
 //
 // The request carries the interval's Merkle root as lower-case hexadecimal.
-// The authority call runs on its own goroutine so that a slow network does not
-// block the caller, and a failed attempt is retried immediately.
+// The interval and its root are snapshotted before the request leaves; a
+// failed attempt returns an error and the caller retries the same interval.
 func (s *Submitter) Submit(ctx context.Context, from, to int64) (receipt.Receipt, error) {
 	if from <= 0 {
 		return receipt.Receipt{}, fmt.Errorf("anchor: from must be positive")
@@ -60,57 +59,73 @@ func (s *Submitter) Submit(ctx context.Context, from, to int64) (receipt.Receipt
 		return receipt.Receipt{}, fmt.Errorf("anchor: empty interval [%d, %d]", from, to)
 	}
 
-	type stampResult struct {
-		sent  string
-		token tsa.Token
-		err   error
-	}
-	done := make(chan stampResult, 1)
-
-	go func() {
-		rootHex := hex.EncodeToString(merkle.RangeRoot(s.store.Leaves(), from, to))
-		req := tsa.Request{FromSeq: from, ToSeq: to, RootHex: rootHex}
-
-		res := stampResult{sent: rootHex}
-		for attempt := 0; attempt < 3; attempt++ {
-			token, err := s.client.Stamp(ctx, req)
-			if err == nil {
-				res.token = token
-				res.err = nil
-				break
-			}
-			res.err = err
-		}
-		done <- res
-	}()
-
-	res := <-done
-	if res.err != nil {
-		return receipt.Receipt{}, fmt.Errorf("anchor: stamp [%d, %d]: %w", from, to, res.err)
-	}
-	if err := tsa.Verify(res.token, s.pub); err != nil {
-		return receipt.Receipt{}, fmt.Errorf("anchor: authority signature: %w", err)
-	}
-	if err := compareRoots(res.sent, res.token.RootHex); err != nil {
+	// Take one snapshot of the interval before the request leaves. Records
+	// appended while the request is in flight belong to a later interval.
+	root, err := s.intervalRoot(from, to)
+	if err != nil {
 		return receipt.Receipt{}, err
 	}
+	sentRoot := hex.EncodeToString(root)
+	req := tsa.Request{FromSeq: from, ToSeq: to, RootHex: sentRoot}
 
-	// The authority has answered. Persist the receipt against the log as it
-	// stands at this point.
-	to = s.store.HeadSeq()
+	token, err := s.client.Stamp(ctx, req)
+	if err != nil {
+		return receipt.Receipt{}, fmt.Errorf("anchor: stamp [%d, %d]: %w", from, to, err)
+	}
+	if err := tsa.Verify(token, s.pub); err != nil {
+		return receipt.Receipt{}, fmt.Errorf("anchor: authority signature: %w", err)
+	}
+	if err := compareRoots(sentRoot, token.RootHex); err != nil {
+		return receipt.Receipt{}, err
+	}
+	if _, err := time.Parse(time.RFC3339, token.GenTime); err != nil {
+		return receipt.Receipt{}, fmt.Errorf("anchor: authority returned an invalid generation time: %w", err)
+	}
 
 	rec := receipt.Receipt{
 		FromSeq: from,
 		ToSeq:   to,
-		Root:    res.token.RootHex,
-		GenTime: res.token.GenTime,
-		Sig:     res.token.Sig,
+		Root:    token.RootHex,
+		GenTime: token.GenTime,
+		Sig:     token.Sig,
 		TSA:     s.name,
 	}
 	if _, err := s.dir.Save(rec); err != nil {
 		return receipt.Receipt{}, err
 	}
 	return rec, nil
+}
+
+// intervalRoot computes the root over exactly [from, to] from a snapshot of
+// the local records.
+func (s *Submitter) intervalRoot(from, to int64) ([]byte, error) {
+	records := s.store.Records()
+	bySeq := make(map[int64]chain.Record, len(records))
+	for _, rec := range records {
+		bySeq[rec.Seq] = rec
+	}
+
+	count := to - from + 1
+	if count <= 0 || count > int64(len(bySeq)) {
+		return nil, fmt.Errorf("anchor: interval [%d, %d] is not fully covered by local records", from, to)
+	}
+	leaves := make(map[int64][]byte, count)
+	for seq := from; seq <= to; seq++ {
+		rec, ok := bySeq[seq]
+		if !ok {
+			return nil, fmt.Errorf("anchor: interval [%d, %d] is not fully covered by local records", from, to)
+		}
+		raw, err := hex.DecodeString(rec.Hash)
+		if err != nil {
+			return nil, fmt.Errorf("anchor: record %d has an invalid hash: %w", seq, err)
+		}
+		leaves[seq] = raw
+	}
+	root := merkle.RangeRoot(leaves, from, to)
+	if root == nil {
+		return nil, fmt.Errorf("anchor: no Merkle root for [%d, %d]", from, to)
+	}
+	return root, nil
 }
 
 // compareRoots checks the root echoed by the authority against the root that
@@ -120,11 +135,11 @@ func compareRoots(sentHex, echoedHex string) error {
 	if err != nil {
 		return fmt.Errorf("anchor: sent root is not hexadecimal")
 	}
-	got, err := base64.StdEncoding.DecodeString(echoedHex)
+	got, err := hex.DecodeString(echoedHex)
 	if err != nil {
-		return nil
+		return fmt.Errorf("anchor: authority returned a root that is not hexadecimal")
 	}
-	if len(got) == len(want) && !bytes.Equal(want, got) {
+	if !bytes.Equal(want, got) {
 		return fmt.Errorf("anchor: authority returned a root that does not match the request")
 	}
 	return nil

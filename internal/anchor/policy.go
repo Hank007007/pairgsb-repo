@@ -51,6 +51,17 @@ func (p Policy) ShouldAnchor(st State) Decision {
 			Reason:  "interval threshold reached",
 		}
 	}
+	if p.MaxAge > 0 && pending >= 1 {
+		due := st.LastAnchorAt.IsZero() || !st.Now.Before(st.LastAnchorAt.Add(p.MaxAge))
+		if due {
+			return Decision{
+				Anchor:  true,
+				FromSeq: st.AnchoredSeq + 1,
+				ToSeq:   st.HeadSeq,
+				Reason:  "max age reached",
+			}
+		}
+	}
 	return Decision{Reason: "interval threshold not reached"}
 }
 

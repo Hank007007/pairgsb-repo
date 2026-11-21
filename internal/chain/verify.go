@@ -2,7 +2,6 @@ package chain
 
 import (
 	"fmt"
-	"sort"
 	"time"
 )
 
@@ -74,44 +73,24 @@ func Verify(records []Record, spans []Span) *Report {
 
 // Range returns the records whose sequence numbers fall in [from, to].
 //
-// The two boundary records are identified by sequence number and the window of
-// records between them is then selected from the timestamp index.
+// Selection is keyed by seq. Timestamps are evidence, not an index, and may
+// move backwards when the wall clock is adjusted.
 func (s *Store) Range(from, to int64) []Record {
 	recs := s.Records()
 	if len(recs) == 0 || from > to {
 		return nil
 	}
 
-	var (
-		fromTime time.Time
-		toTime   time.Time
-		okFrom   bool
-		okTo     bool
-	)
+	out := make([]Record, 0)
 	for _, rec := range recs {
-		if rec.Seq == from {
-			fromTime, okFrom = parseTS(rec.Time)
-		}
-		if rec.Seq == to {
-			toTime, okTo = parseTS(rec.Time)
+		if rec.Seq >= from && rec.Seq <= to {
+			out = append(out, rec)
 		}
 	}
-	if !okFrom || !okTo {
+	if len(out) == 0 {
 		return nil
 	}
-
-	first := sort.Search(len(recs), func(i int) bool {
-		ts, ok := parseTS(recs[i].Time)
-		return ok && !ts.Before(fromTime)
-	})
-	last := sort.Search(len(recs), func(i int) bool {
-		ts, ok := parseTS(recs[i].Time)
-		return ok && ts.After(toTime)
-	})
-	if first >= last {
-		return nil
-	}
-	return recs[first:last]
+	return out
 }
 
 func parseTS(s string) (time.Time, bool) {
@@ -124,39 +103,43 @@ func parseTS(s string) (time.Time, bool) {
 
 // FindByTime returns the record whose timestamp is nearest to, and not after,
 // the supplied instant. The second result is false when no such record exists.
+//
+// Timestamps are not sorted because the wall clock can step backwards, so the
+// lookup scans the records instead of binary-searching the timestamp column.
 func (s *Store) FindByTime(at time.Time) (Record, bool) {
 	recs := s.Records()
-	lo, hi := 0, len(recs)
-	for lo < hi {
-		mid := int(uint(lo+hi) >> 1)
-		ts, err := time.Parse(time.RFC3339, recs[mid].Time)
-		if err != nil || ts.After(at) {
-			hi = mid
+	var (
+		best   Record
+		bestTS time.Time
+		found  bool
+	)
+	for _, rec := range recs {
+		ts, ok := parseTS(rec.Time)
+		if !ok || ts.After(at) {
 			continue
 		}
-		lo = mid + 1
+		if !found || ts.After(bestTS) || (ts.Equal(bestTS) && rec.Seq > best.Seq) {
+			best = rec
+			bestTS = ts
+			found = true
+		}
 	}
-	if lo == 0 {
-		return Record{}, false
-	}
-	return recs[lo-1], true
+	return best, found
 }
 
 // RecordsBetween returns the records whose timestamps fall inside [start, end].
 //
-// The bounds are located by a binary search over the timestamps.
+// Timestamps are not sorted, so every record is considered. The result stays
+// in chain order.
 func (s *Store) RecordsBetween(start, end time.Time) []Record {
 	recs := s.Records()
-	first := sort.Search(len(recs), func(i int) bool {
-		ts, err := time.Parse(time.RFC3339, recs[i].Time)
-		return err == nil && !ts.Before(start)
-	})
-	last := sort.Search(len(recs), func(i int) bool {
-		ts, err := time.Parse(time.RFC3339, recs[i].Time)
-		return err == nil && ts.After(end)
-	})
-	if first >= last {
-		return nil
+	var out []Record
+	for _, rec := range recs {
+		ts, ok := parseTS(rec.Time)
+		if !ok || ts.Before(start) || ts.After(end) {
+			continue
+		}
+		out = append(out, rec)
 	}
-	return recs[first:last]
+	return out
 }

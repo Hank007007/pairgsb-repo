@@ -66,7 +66,8 @@ func (r *Runner) AnchoredSeq() int64 {
 }
 
 // Tick performs one policy evaluation. When the policy asks for an anchor the
-// runner submits exactly the interval the policy named and records it.
+// runner submits the policy's pending range as consecutive, non-overlapping
+// chunks of at most Interval records.
 func (r *Runner) Tick(ctx context.Context, headSeq int64) (Decision, error) {
 	r.mu.Lock()
 	st := State{
@@ -82,21 +83,33 @@ func (r *Runner) Tick(ctx context.Context, headSeq int64) (Decision, error) {
 		return dec, nil
 	}
 
-	rec, err := r.submitter.Submit(ctx, dec.FromSeq, dec.ToSeq)
-	if err != nil {
-		// The interval stays unanchored; the next tick retries it.
-		return dec, err
-	}
+	for from := dec.FromSeq; from <= dec.ToSeq; {
+		to := dec.ToSeq
+		if r.policy.Interval > 0 {
+			limit := from + int64(r.policy.Interval) - 1
+			if limit < to {
+				to = limit
+			}
+		}
 
-	r.mu.Lock()
-	if rec.ToSeq > r.anchoredSeq {
-		r.anchoredSeq = rec.ToSeq
+		rec, err := r.submitter.Submit(ctx, from, to)
+		if err != nil {
+			// The failed chunk stays unanchored; the next tick retries it.
+			return dec, err
+		}
+
+		r.mu.Lock()
+		if rec.ToSeq > r.anchoredSeq {
+			r.anchoredSeq = rec.ToSeq
+		}
+		if gen, err := time.Parse(time.RFC3339, rec.GenTime); err == nil {
+			r.lastAnchorAt = gen
+		} else {
+			r.lastAnchorAt = r.now()
+		}
+		r.mu.Unlock()
+
+		from = rec.ToSeq + 1
 	}
-	if gen, err := time.Parse(time.RFC3339, rec.GenTime); err == nil {
-		r.lastAnchorAt = gen
-	} else {
-		r.lastAnchorAt = r.now()
-	}
-	r.mu.Unlock()
 	return dec, nil
 }

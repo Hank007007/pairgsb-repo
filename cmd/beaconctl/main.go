@@ -227,7 +227,12 @@ func (a *App) cmdVerify(args []string) int {
 		}
 	}
 
-	ctx := receipt.CheckContext{PublicKey: pub}
+	ctx := receipt.CheckContext{
+		PublicKey: pub,
+		Records:   store.Records(),
+		Store:     store,
+		HeadSeq:   store.HeadSeq(),
+	}
 	for _, f := range receipt.VerifyAll(receipts, ctx) {
 		failed = true
 		fmt.Fprintf(a.Stdout, "%s\n", f)
@@ -250,11 +255,15 @@ func (a *App) rootFor(store *chain.Store, from, to int64) (string, error) {
 	for _, rec := range recs {
 		raw, err := hex.DecodeString(rec.Hash)
 		if err != nil {
-			continue
+			return "", fmt.Errorf("record %d has an invalid hash: %w", rec.Seq, err)
 		}
 		leaves[rec.Seq] = raw
 	}
-	return hex.EncodeToString(merkle.RangeRoot(leaves, from, to)), nil
+	root := merkle.RangeRoot(leaves, from, to)
+	if root == nil {
+		return "", fmt.Errorf("interval [%d, %d] is not fully covered", from, to)
+	}
+	return hex.EncodeToString(root), nil
 }
 
 func (a *App) cmdAuthority(args []string) int {

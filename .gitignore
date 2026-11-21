@@ -1,0 +1,24 @@
+# Build artifacts
+/bin/
+/dist/
+/beaconctl
+/beaconctl.exe
+
+# Go caches and test output
+*.test
+*.out
+coverage.*
+profile.cov
+
+# Editor / OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local runtime data
+/data/
+/receipts-test/
+
+# Local scratch
+.build.prompt.txt

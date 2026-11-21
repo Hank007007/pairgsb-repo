@@ -1,0 +1,17 @@
+node_modules/
+coverage/
+.nyc_output/
+dist/
+build/
+out/
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.DS_Store
+Thumbs.db
+.env
+.env.*
+.cache/
+.tmp/
+.build.prompt.txt

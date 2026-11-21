@@ -1,0 +1,28 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test and coverage artifacts
+*.test
+*.out
+coverage.*
+profile.*
+
+# Editor and OS metadata
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local run data and scratch space
+/tmp/
+/tmp_*/
+/.witness-data/
+/build.prompt.txt
+.build.prompt.txt

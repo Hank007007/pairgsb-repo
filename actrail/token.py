@@ -143,11 +143,26 @@ def parse_token(
     claims = decode_token(token, key=key)
     now = (clock or SystemClock()).now()
     expires_at = claims.get("exp")
-    if expires_at and expires_at <= now:
+    if not isinstance(expires_at, int) or isinstance(expires_at, bool):
+        raise TokenError("token is missing a valid exp claim")
+    if expires_at == 0:
+        raise TokenError("token exp must not be zero")
+    if expires_at <= now:
         raise TokenExpiredError("token has expired")
     issued_at = claims.get("iat")
-    if isinstance(issued_at, int) and issued_at > now:
+    if not isinstance(issued_at, int) or isinstance(issued_at, bool):
+        raise TokenError("token is missing a valid iat claim")
+    if issued_at > now:
         raise TokenError("token was issued in the future")
+    if expires_at <= issued_at:
+        raise TokenError("token exp must be greater than iat")
+    order = delegation_order(claims)
+    if len(order) > MAX_DELEGATION_HOPS + 1:
+        raise ChainError(
+            f"delegation chain may have at most {MAX_DELEGATION_HOPS} hops"
+        )
+    if len(set(order)) != len(order):
+        raise ChainError("delegation chain must not repeat a principal")
     return claims
 
 
@@ -216,21 +231,27 @@ def validate_delegation(
     policy: Policy | None = None,
     context: Mapping[str, Any] | None = None,
 ) -> list[str]:
-    """Return the origin-to-subject order recorded on ``claims``.
+    """Validate the chain recorded on ``claims`` and return it origin first.
 
-    The order is derived from ``act`` and the subject of the token, and each
-    principal after the origin is looked up in the policy.
+    Every hop ``P -> Q`` is authorised against the binding for ``(P, Q)``;
+    chains longer than :data:`MAX_DELEGATION_HOPS` hops and chains that repeat
+    a principal are refused.
     """
 
     policy = policy or default_policy()
     context = context or {}
     order = delegation_order(claims)
-    origin = order[0]
-    for delegate in order[1:]:
-        if delegate == origin:
-            continue
-        if not policy.can_impersonate(origin, delegate, context):
-            raise PolicyError(f"{origin!r} may not impersonate {delegate!r}")
+    if len(order) > MAX_DELEGATION_HOPS + 1:
+        raise ChainError(
+            f"delegation chain may have at most {MAX_DELEGATION_HOPS} hops"
+        )
+    if len(set(order)) != len(order):
+        raise ChainError("delegation chain must not repeat a principal")
+    for delegator, delegate in zip(order, order[1:]):
+        if not policy.can_impersonate(delegator, delegate, context):
+            raise PolicyError(
+                f"{delegator!r} may not impersonate {delegate!r}"
+            )
     return order
 
 
@@ -259,24 +280,45 @@ def _caller_order(
     clock: Clock,
     key: bytes | str | None,
     context: Mapping[str, Any],
-) -> tuple[str, ...]:
-    """Return the origin-to-actor order of the credential ``actor`` presents."""
+) -> tuple[tuple[str, ...], tuple[str, ...], int | None]:
+    """Resolve the credential ``actor`` presents.
+
+    Returns the origin-to-actor order, the scopes the caller currently holds,
+    and the caller's remaining token lifetime (``None`` when the caller
+    authenticates as itself rather than with an impersonated token).
+    """
 
     if actor_token is None:
-        policy.principal(actor)
-        return (actor,)
+        return (actor,), policy.principal(actor).scopes, None
 
     claims = parse_token(actor_token, clock=clock, key=key)
     if claims["sub"] != actor:
         raise TokenError(f"actor token belongs to {claims['sub']!r}, not {actor!r}")
-    return tuple(validate_delegation(claims, policy=policy, context=context))
+    order = tuple(validate_delegation(claims, policy=policy, context=context))
+    caller_scopes = tuple(token_scopes(claims))
+    remaining = int(claims["exp"]) - clock.now()
+    return order, caller_scopes, remaining
 
 
-def _grant_scopes(requested: Iterable[str], target: Any) -> list[str]:
-    """Select the scopes to put on the new token."""
+def _grant_scopes(
+    requested: Iterable[str],
+    caller_scopes: Iterable[str],
+    target: Any,
+) -> list[str]:
+    """Select the scopes to put on the new token.
 
+    The granted set is the intersection of the request, the caller's own
+    scopes and the target's scopes; anything outside that intersection is
+    refused rather than unioned.
+    """
+
+    caller_inventory = set(caller_scopes)
     granted: list[str] = []
     for scope in requested:
+        if scope not in caller_inventory:
+            raise ScopeError(
+                f"caller does not hold scope {scope!r} and cannot delegate it"
+            )
         if scope not in target.scopes:
             raise ScopeError(f"target {target.name!r} does not hold scope {scope!r}")
         granted.append(scope)
@@ -307,21 +349,36 @@ def mint_impersonated(
     requested = _coerce_scope_argument(scopes)
     target_principal = policy.principal(target)
 
-    order = _caller_order(actor, actor_token, policy, clock, key, context)
+    order, caller_scopes, caller_remaining = _caller_order(
+        actor, actor_token, policy, clock, key, context
+    )
 
     # ``order`` ends with the actor, so its length is one more than the number
     # of hops the caller's credential already represents.
-    if len(order) >= MAX_DELEGATION_HOPS + 2:
+    if len(order) > MAX_DELEGATION_HOPS:
         raise ChainError(
             f"delegation chain may have at most {MAX_DELEGATION_HOPS} hops"
         )
+    if target in order:
+        raise ChainError(
+            f"{target!r} already appears in the delegation chain"
+        )
     new_order = list(order) + [target]
 
-    granted = _grant_scopes(requested, target_principal)
+    granted = _grant_scopes(requested, caller_scopes, target_principal)
 
-    granted_ttl = max(int(ttl or 0), 0)
+    if ttl is None or not isinstance(ttl, int) or isinstance(ttl, bool):
+        raise TokenError("ttl must be a positive integer")
+    if ttl <= 0:
+        raise TokenError("ttl must be a positive integer")
+    lifetime_limits = [ttl, target_principal.max_session_seconds]
+    if caller_remaining is not None:
+        lifetime_limits.append(caller_remaining)
+    granted_ttl = min(lifetime_limits)
+    if granted_ttl <= 0:
+        raise TokenError("no positive lifetime remains for the new token")
     now = clock.now()
-    expires_at = now + granted_ttl if granted_ttl else 0
+    expires_at = now + granted_ttl
 
     payload: dict[str, Any] = {
         "iss": ISSUER,

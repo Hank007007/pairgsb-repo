@@ -8,18 +8,30 @@ their scope inventories live in ``policy/principals.json``.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from fnmatch import fnmatchcase
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover - zoneinfo is stdlib on Python 3.10+
+    ZoneInfo = None
 
 from .errors import PolicyError
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BINDINGS_PATH = REPO_ROOT / "policy" / "bindings.json"
 DEFAULT_PRINCIPALS_PATH = REPO_ROOT / "policy" / "principals.json"
+
+KNOWN_CONDITION_KEYS = frozenset(
+    {"tenant", "time_window", "resource_label", "source_network"}
+)
+_WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 
 def _freeze(value: Any) -> Any:
@@ -234,14 +246,135 @@ class Policy:
 
     # -- condition evaluation ------------------------------------------
 
+    @staticmethod
+    def _tenant_holds(expected: Any, context: Mapping[str, Any]) -> bool:
+        if not isinstance(expected, str) or not expected:
+            return False
+        actual = context.get("tenant")
+        return isinstance(actual, str) and actual == expected
+
+    @staticmethod
+    def _source_network_holds(expected: Any, context: Mapping[str, Any]) -> bool:
+        if not isinstance(expected, (list, tuple)) or not expected:
+            return False
+        actual = context.get("source_network")
+        if not isinstance(actual, str):
+            return False
+        try:
+            address = ipaddress.ip_address(actual)
+        except ValueError:
+            return False
+        for block in expected:
+            if not isinstance(block, str):
+                return False
+            try:
+                if address in ipaddress.ip_network(block, strict=False):
+                    return True
+            except ValueError:
+                return False
+        return False
+
+    @staticmethod
+    def _resource_label_holds(expected: Any, context: Mapping[str, Any]) -> bool:
+        if not isinstance(expected, Mapping) or not expected:
+            return False
+        actual = context.get("resource_label")
+        if not isinstance(actual, Mapping):
+            return False
+        for label, value in expected.items():
+            if label not in actual or actual[label] != value:
+                return False
+        return True
+
+    @staticmethod
+    def _context_instant(value: Any) -> datetime | None:
+        if isinstance(value, datetime):
+            instant = value
+        elif isinstance(value, int) and not isinstance(value, bool):
+            instant = datetime.fromtimestamp(value, tz=timezone.utc)
+        elif isinstance(value, float):
+            instant = datetime.fromtimestamp(value, tz=timezone.utc)
+        elif isinstance(value, str):
+            try:
+                instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        else:
+            return None
+        if instant.tzinfo is None:
+            instant = instant.replace(tzinfo=timezone.utc)
+        return instant
+
+    @staticmethod
+    def _parse_clock_time(value: Any) -> tuple[int, int] | None:
+        if not isinstance(value, str):
+            return None
+        try:
+            hour_text, minute_text = value.split(":", 1)
+            hour, minute = int(hour_text), int(minute_text)
+        except (ValueError, AttributeError):
+            return None
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return None
+        return hour, minute
+
+    def _time_window_holds(
+        self, expected: Any, context: Mapping[str, Any]
+    ) -> bool:
+        if not isinstance(expected, Mapping):
+            return False
+        start = self._parse_clock_time(expected.get("start"))
+        end = self._parse_clock_time(expected.get("end"))
+        days = expected.get("days")
+        zone_name = expected.get("timezone", "UTC")
+        if start is None or end is None:
+            return False
+        if not isinstance(days, (list, tuple)) or not days or not all(
+            isinstance(day, str) and day.lower() in _WEEKDAYS for day in days
+        ):
+            return False
+        if not isinstance(zone_name, str):
+            return False
+        instant = self._context_instant(context.get("time_window"))
+        if instant is None:
+            return False
+        if zone_name.upper() in ("UTC", "GMT"):
+            local = instant.astimezone(timezone.utc)
+        elif ZoneInfo is not None:
+            try:
+                local = instant.astimezone(ZoneInfo(zone_name))
+            except Exception:
+                return False
+        else:  # pragma: no cover - stdlib zoneinfo is always available
+            return False
+        if _WEEKDAYS[local.weekday()] not in {day.lower() for day in days}:
+            return False
+        start_minutes = start[0] * 60 + start[1]
+        end_minutes = end[0] * 60 + end[1]
+        now_minutes = local.hour * 60 + local.minute
+        if start_minutes <= end_minutes:
+            return start_minutes <= now_minutes < end_minutes
+        return now_minutes >= start_minutes or now_minutes < end_minutes
+
     def binding_applies(self, binding: Binding, context: Mapping[str, Any]) -> bool:
         """Return whether ``binding`` applies to the request context."""
 
         conditions = binding.conditions or {}
+        if not isinstance(context, Mapping):
+            return False
         for key, expected in conditions.items():
+            if key not in KNOWN_CONDITION_KEYS:
+                return False
             if key == "tenant":
-                if "tenant" in context and context["tenant"] != expected:
-                    return False
+                holds = self._tenant_holds(expected, context)
+            elif key == "source_network":
+                holds = self._source_network_holds(expected, context)
+            elif key == "resource_label":
+                holds = self._resource_label_holds(expected, context)
+            else:
+                holds = self._time_window_holds(expected, context)
+            if not holds:
+                return False
         return True
 
     # -- public API -----------------------------------------------------

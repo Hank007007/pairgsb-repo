@@ -102,7 +102,7 @@ def record(
 
     chain = act_chain(claims)
     actor = chain[-1] if chain else None
-    act_value: list[str] = [actor] if actor is not None else []
+    act_value: list[str] = list(chain)
     audit_record = AuditRecord(
         at=(clock or SystemClock()).now(),
         action=action,

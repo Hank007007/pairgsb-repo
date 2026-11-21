@@ -74,10 +74,9 @@ def explain(
                 reason=f"token is missing scopes: {' '.join(sorted(missing))}",
             )
 
+    # The decision is made for ``sub`` alone: a delegator's permissions never
+    # widen what the subject may do.
     allowed = _has_permission(principal.permissions, action, resource)
-    if not allowed and actor is not None:
-        actor_principal = policy.principal(actor)
-        allowed = _has_permission(actor_principal.permissions, action, resource)
 
     if not allowed:
         return Decision(

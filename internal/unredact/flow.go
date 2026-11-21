@@ -59,16 +59,10 @@ func Unredact(log Log, salts *keystore.Store, approver *Approver, registry *Regi
 	if err != nil {
 		return Result{}, err
 	}
-	result.Salt = entry.Salt
 
 	plaintext, err := record.Open(entry.Salt, redacted.SaltID, req.Field, entry.Ciphertext)
 	if err != nil {
-		return result, err
-	}
-	result.Plaintext = record.RenderPlain(plaintext)
-
-	if deliver != nil {
-		deliver(result.Plaintext)
+		return Result{}, err
 	}
 
 	audit := record.Record{
@@ -85,8 +79,14 @@ func Unredact(log Log, salts *keystore.Store, approver *Approver, registry *Regi
 	}
 	appended, err := log.Append(audit)
 	if err != nil {
-		return result, nil
+		return Result{}, fmt.Errorf("unredact: audit append failed: %w", err)
 	}
+
+	result.Plaintext = record.RenderPlain(plaintext)
+	result.Salt = entry.Salt
 	result.AuditSeq = appended.Seq
+	if deliver != nil {
+		deliver(result.Plaintext)
+	}
 	return result, nil
 }

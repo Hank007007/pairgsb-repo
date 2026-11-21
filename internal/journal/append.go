@@ -3,13 +3,11 @@ package journal
 
 import (
 	"bufio"
-	"errors"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 
 	"maskseal-journal/internal/record"
@@ -26,7 +24,6 @@ type Journal struct {
 	dir     string
 	data    *os.File
 	index   *os.File
-	writer  *bufio.Writer
 	mu      sync.Mutex
 	seq     int64
 	prev    string
@@ -41,62 +38,102 @@ type Entry struct {
 	Length int64
 }
 
-// Open opens or creates the journal in dir.
+// Open opens or creates the journal in dir. The data file is the source of
+// truth: the index is rebuilt from complete records on every open, and an
+// incomplete tail is discarded.
 func Open(dir string) (*Journal, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("journal: %w", err)
-	}
-	j := &Journal{dir: dir, prev: record.GenesisHash}
-	if err := j.loadIndex(); err != nil {
-		return nil, err
 	}
 	data, err := os.OpenFile(filepath.Join(dir, DataFileName), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("journal: %w", err)
 	}
-	j.data = data
-	j.writer = bufio.NewWriter(data)
-	if len(j.entries) > 0 {
-		last := j.entries[len(j.entries)-1]
-		j.seq = last.Seq
-		j.offset = last.Offset + last.Length
-		rec, err := readRecordAt(data, last)
-		if err != nil {
-			return nil, err
-		}
-		j.prev = rec.Hash
+	entries, seq, prev, offset, err := rebuildIndex(dir, data)
+	if err != nil {
+		data.Close()
+		return nil, err
 	}
-	if _, err := data.Seek(j.offset, io.SeekStart); err != nil {
+	if _, err := data.Seek(offset, io.SeekStart); err != nil {
+		data.Close()
 		return nil, fmt.Errorf("journal: %w", err)
 	}
-	return j, nil
+	return &Journal{
+		dir:     dir,
+		data:    data,
+		seq:     seq,
+		prev:    prev,
+		offset:  offset,
+		entries: entries,
+	}, nil
 }
 
-func (j *Journal) loadIndex() error {
-	raw, err := os.ReadFile(filepath.Join(j.dir, IndexFileName))
+// rebuildIndex scans the data file for complete newline-terminated records,
+// truncates a partial tail, and rewrites the derived index.
+func rebuildIndex(dir string, data *os.File) ([]Entry, int64, string, int64, error) {
+	if _, err := data.Seek(0, io.SeekStart); err != nil {
+		return nil, 0, "", 0, fmt.Errorf("journal: %w", err)
+	}
+	raw, err := io.ReadAll(data)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
+		return nil, 0, "", 0, fmt.Errorf("journal: %w", err)
+	}
+
+	var entries []Entry
+	var offset int64
+	seq := int64(0)
+	prev := record.GenesisHash
+	for offset < int64(len(raw)) {
+		nl := bytes.IndexByte(raw[offset:], '\n')
+		if nl < 0 {
+			break
 		}
+		line := raw[offset : offset+int64(nl)]
+		rec, err := record.Decode(line)
+		if err != nil {
+			return nil, 0, "", 0, fmt.Errorf("journal: seq %d: %w", len(entries)+1, err)
+		}
+		length := int64(nl) + 1
+		entries = append(entries, Entry{Seq: rec.Seq, Offset: offset, Length: length})
+		seq = rec.Seq
+		prev = rec.Hash
+		offset += length
+	}
+	if offset < int64(len(raw)) {
+		if err := data.Truncate(offset); err != nil {
+			return nil, 0, "", 0, fmt.Errorf("journal: truncate partial record: %w", err)
+		}
+		if err := data.Sync(); err != nil {
+			return nil, 0, "", 0, fmt.Errorf("journal: %w", err)
+		}
+	}
+	if err := writeIndexFile(dir, entries); err != nil {
+		return nil, 0, "", 0, err
+	}
+	return entries, seq, prev, offset, nil
+}
+
+func writeIndexFile(dir string, entries []Entry) error {
+	f, err := os.OpenFile(filepath.Join(dir, IndexFileName), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
 		return fmt.Errorf("journal: %w", err)
 	}
-	for _, line := range strings.Split(strings.TrimRight(string(raw), "\r\n"), "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
+	w := bufio.NewWriter(f)
+	for _, entry := range entries {
+		if _, err := fmt.Fprintf(w, "%d %d %d\n", entry.Seq, entry.Offset, entry.Length); err != nil {
+			f.Close()
+			return fmt.Errorf("journal: %w", err)
 		}
-		parts := strings.Split(strings.TrimSpace(line), " ")
-		if len(parts) != 3 {
-			return fmt.Errorf("journal: corrupt index line %q", line)
-		}
-		seq, err1 := strconv.ParseInt(parts[0], 10, 64)
-		off, err2 := strconv.ParseInt(parts[1], 10, 64)
-		length, err3 := strconv.ParseInt(parts[2], 10, 64)
-		if err1 != nil || err2 != nil || err3 != nil {
-			return fmt.Errorf("journal: corrupt index line %q", line)
-		}
-		j.entries = append(j.entries, Entry{Seq: seq, Offset: off, Length: length})
 	}
-	return nil
+	if err := w.Flush(); err != nil {
+		f.Close()
+		return fmt.Errorf("journal: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return fmt.Errorf("journal: %w", err)
+	}
+	return f.Close()
 }
 
 func readRecordAt(f *os.File, e Entry) (record.Record, error) {
@@ -112,17 +149,18 @@ func (j *Journal) Close() error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	var first error
-	if j.writer != nil {
-		if err := j.writer.Flush(); err != nil && first == nil {
+	if j.data != nil {
+		if err := j.data.Sync(); err != nil && first == nil {
 			first = err
 		}
-	}
-	if j.data != nil {
 		if err := j.data.Close(); err != nil && first == nil {
 			first = err
 		}
 	}
 	if j.index != nil {
+		if err := j.index.Sync(); err != nil && first == nil {
+			first = err
+		}
 		if err := j.index.Close(); err != nil && first == nil {
 			first = err
 		}
@@ -132,34 +170,57 @@ func (j *Journal) Close() error {
 
 // Append seals r into the journal and returns the stored record.
 func (j *Journal) Append(r record.Record) (record.Record, error) {
-	prev := j.prev
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
 	r.Seq = j.seq + 1
-	r.PrevHash = prev
+	r.PrevHash = j.prev
 	r.Hash = record.Hash(r)
 	line, err := record.Encode(r)
 	if err != nil {
 		return record.Record{}, err
 	}
 
+	payload := make([]byte, len(line)+1)
+	copy(payload, line)
+	payload[len(line)] = '\n'
 	offset := j.offset
-	if _, err := j.writer.Write(line); err != nil {
+	if err := writeFullAt(j.data, payload, offset); err != nil {
+		_ = j.data.Truncate(offset)
+		_ = j.data.Sync()
 		return record.Record{}, fmt.Errorf("journal: %w", err)
 	}
-	if err := j.writer.WriteByte('\n'); err != nil {
-		return record.Record{}, fmt.Errorf("journal: %w", err)
-	}
-	entry := Entry{Seq: r.Seq, Offset: offset, Length: int64(len(line) + 1)}
-	if err := j.writeIndexEntry(entry); err != nil {
-		return record.Record{}, err
-	}
+
+	entry := Entry{Seq: r.Seq, Offset: offset, Length: int64(len(payload))}
 	j.entries = append(j.entries, entry)
 	j.seq = r.Seq
 	j.prev = r.Hash
 	j.offset += entry.Length
+
+	// The index must never describe a record whose bytes are not present in
+	// the data file. Sync the data before making the index entry visible.
+	if err := j.data.Sync(); err != nil {
+		return r, fmt.Errorf("journal: %w", err)
+	}
+	if err := j.writeIndexEntry(entry); err != nil {
+		return r, err
+	}
 	return r, nil
+}
+
+func writeFullAt(f *os.File, buf []byte, offset int64) error {
+	for len(buf) > 0 {
+		n, err := f.WriteAt(buf, offset)
+		offset += int64(n)
+		buf = buf[n:]
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
 }
 
 func (j *Journal) writeIndexEntry(e Entry) error {
@@ -171,7 +232,10 @@ func (j *Journal) writeIndexEntry(e Entry) error {
 		j.index = f
 	}
 	line := fmt.Sprintf("%d %d %d\n", e.Seq, e.Offset, e.Length)
-	if _, err := j.index.WriteString(line); err != nil {
+	if _, err := io.WriteString(j.index, line); err != nil {
+		return fmt.Errorf("journal: %w", err)
+	}
+	if err := j.index.Sync(); err != nil {
 		return fmt.Errorf("journal: %w", err)
 	}
 	return nil

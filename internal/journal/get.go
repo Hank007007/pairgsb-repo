@@ -10,11 +10,6 @@ import (
 func (j *Journal) Get(seq int64) (record.Record, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if j.writer != nil {
-		if err := j.writer.Flush(); err != nil {
-			return record.Record{}, fmt.Errorf("journal: %w", err)
-		}
-	}
 	for _, entry := range j.entries {
 		if entry.Seq == seq {
 			return readRecordAt(j.data, entry)
@@ -27,11 +22,6 @@ func (j *Journal) Get(seq int64) (record.Record, error) {
 func (j *Journal) All() ([]record.Record, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if j.writer != nil {
-		if err := j.writer.Flush(); err != nil {
-			return nil, fmt.Errorf("journal: %w", err)
-		}
-	}
 	out := make([]record.Record, 0, len(j.entries))
 	for _, entry := range j.entries {
 		rec, err := readRecordAt(j.data, entry)

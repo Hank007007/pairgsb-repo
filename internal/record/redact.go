@@ -9,8 +9,9 @@ import (
 	"maskseal-journal/internal/policy"
 )
 
-// SealedValue is produced by Redact for each field a policy marks for
-// redaction.
+// SealedValue is produced by Redact for each leaf selected by an explicit
+// rule. Leaves redacted only by the default action are still committed and
+// stored, but are not listed here.
 type SealedValue struct {
 	Path       string
 	Commitment *Redacted
@@ -19,8 +20,8 @@ type SealedValue struct {
 	Ciphertext []byte
 }
 
-// Redact walks fields, replaces every field the policy marks for redaction
-// with a commitment, and returns the sealed copies of the replaced values.
+// Redact walks fields, replaces every leaf that is not explicitly kept with a
+// commitment, and returns the sealed copies selected by explicit rules.
 func Redact(fields map[string]any, rules *policy.RuleSet, salts *keystore.Store) (map[string]any, []SealedValue, error) {
 	cloned := CloneFields(fields)
 	leaves := Flatten(cloned)
@@ -29,7 +30,7 @@ func Redact(fields map[string]any, rules *policy.RuleSet, salts *keystore.Store)
 		if _, already := leaf.Value.(*Redacted); already {
 			continue
 		}
-		action, _ := rules.Match(leaf.Path)
+		action, matched := rules.Match(leaf.Path)
 		if action != policy.ActionRedact {
 			continue
 		}
@@ -59,11 +60,15 @@ func Redact(fields map[string]any, rules *policy.RuleSet, salts *keystore.Store)
 		if err := setPath(cloned, leaf.Path, &Redacted{SaltID: string(id), Commitment: commitment}); err != nil {
 			return nil, nil, err
 		}
-		sealed = append(sealed, SealedValue{
-			Path:       leaf.Path,
-			Commitment: &Redacted{SaltID: string(id), Commitment: commitment},
-			Ciphertext: ciphertext,
-		})
+		// Default-redacted leaves are still committed and stored; the
+		// returned list describes the leaves an explicit rule selected.
+		if matched {
+			sealed = append(sealed, SealedValue{
+				Path:       leaf.Path,
+				Commitment: &Redacted{SaltID: string(id), Commitment: commitment},
+				Ciphertext: ciphertext,
+			})
+		}
 	}
 	return cloned, sealed, nil
 }

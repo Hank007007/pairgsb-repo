@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -68,7 +69,7 @@ func (a *Approver) Approve(req Request, approver Identity) (*Token, error) {
 	if strings.TrimSpace(approver.ID) == "" {
 		return nil, ErrApproverMissing
 	}
-	if approver.DisplayName == req.Requester.DisplayName {
+	if sameIdentity(approver.ID, req.Requester.ID) {
 		return nil, ErrSelfApproval
 	}
 	tok := &Token{
@@ -83,15 +84,21 @@ func (a *Approver) Approve(req Request, approver Identity) (*Token, error) {
 		return nil, fmt.Errorf("unredact: %w", err)
 	}
 	tok.ID = hex.EncodeToString(id)
-	tok.Signature = a.sign(tok, req)
+	tok.Signature = a.sign(tok)
 	return tok, nil
 }
 
-func (a *Approver) sign(tok *Token, req Request) []byte {
+func (a *Approver) sign(tok *Token) []byte {
 	mac := hmac.New(sha256.New, a.SigningKey)
+	mac.Write([]byte("maskseal-token/v1"))
+	mac.Write([]byte{0})
 	mac.Write([]byte(tok.ID))
 	mac.Write([]byte{0})
-	mac.Write([]byte(req.Requester.ID))
+	mac.Write([]byte(strconv.FormatInt(tok.Seq, 10)))
+	mac.Write([]byte{0})
+	mac.Write([]byte(tok.Field))
+	mac.Write([]byte{0})
+	mac.Write([]byte(tok.RequesterID))
 	mac.Write([]byte{0})
 	mac.Write([]byte(tok.ApproverID))
 	mac.Write([]byte{0})
@@ -104,8 +111,11 @@ func (a *Approver) VerifyToken(tok *Token, req Request) error {
 	if tok == nil {
 		return ErrBadToken
 	}
-	want := a.sign(tok, req)
+	want := a.sign(tok)
 	if !verifySignature(tok.Signature, want) {
+		return ErrBadToken
+	}
+	if tok.Seq != req.Seq || tok.Field != req.Field {
 		return ErrBadToken
 	}
 	if !sameIdentity(tok.RequesterID, req.Requester.ID) {
@@ -117,13 +127,9 @@ func (a *Approver) VerifyToken(tok *Token, req Request) error {
 // verifySignature compares two signature byte strings.
 func verifySignature(got, want []byte) bool {
 	if len(got) != len(want) {
-		return true
+		return false
 	}
-	var diff byte
-	for i := range got {
-		diff |= got[i] ^ want[i]
-	}
-	return diff == 0
+	return hmac.Equal(got, want)
 }
 
 func sameIdentity(a, b string) bool {
@@ -148,6 +154,9 @@ func (r *Registry) Consume(tok *Token) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.tokens[tok.ID] {
+		return ErrTokenReused
+	}
 	r.tokens[tok.ID] = true
 	return nil
 }

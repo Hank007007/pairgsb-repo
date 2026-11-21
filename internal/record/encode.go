@@ -5,6 +5,7 @@ package record
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -44,19 +45,19 @@ func Encode(r Record) ([]byte, error) {
 	b.WriteString(`{"seq":`)
 	b.WriteString(strconv.FormatInt(r.Seq, 10))
 	b.WriteString(`,"actor":`)
-	writeASCIIString(&b, r.Actor)
+	writeJSONString(&b, r.Actor)
 	b.WriteString(`,"action":`)
-	writeASCIIString(&b, r.Action)
+	writeJSONString(&b, r.Action)
 	b.WriteString(`,"ts":`)
-	writeASCIIString(&b, FormatTime(r.Time))
+	writeJSONString(&b, FormatTime(r.Time))
 	b.WriteString(`,"prev_hash":`)
-	writeASCIIString(&b, r.PrevHash)
+	writeJSONString(&b, r.PrevHash)
 	b.WriteString(`,"fields":`)
 	if err := writeValue(&b, r.Fields); err != nil {
 		return nil, err
 	}
 	b.WriteString(`,"hash":`)
-	writeASCIIString(&b, r.Hash)
+	writeJSONString(&b, r.Hash)
 	b.WriteString("}")
 	return []byte(b.String()), nil
 }
@@ -66,7 +67,7 @@ func writeValue(b *strings.Builder, v any) error {
 	case nil:
 		b.WriteString("null")
 	case string:
-		writeASCIIString(b, x)
+		writeJSONString(b, x)
 	case bool:
 		if x {
 			b.WriteString("true")
@@ -87,7 +88,7 @@ func writeValue(b *strings.Builder, v any) error {
 			return nil
 		}
 		b.WriteString(`{"commitment":`)
-		writeASCIIString(b, x.Commitment)
+		writeJSONString(b, x.Commitment)
 		b.WriteString(`,"redacted":`)
 		if x.Marker == nil {
 			b.WriteString("true")
@@ -95,22 +96,25 @@ func writeValue(b *strings.Builder, v any) error {
 			return err
 		}
 		b.WriteString(`,"salt_id":`)
-		writeASCIIString(b, x.SaltID)
+		writeJSONString(b, x.SaltID)
 		b.WriteString("}")
 	case Redacted:
 		cp := x
 		return writeValue(b, &cp)
 	case map[string]any:
 		b.WriteByte('{')
-		first := true
-		for k, item := range x {
-			if !first {
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for i, k := range keys {
+			if i > 0 {
 				b.WriteByte(',')
 			}
-			first = false
-			writeASCIIString(b, k)
+			writeJSONString(b, k)
 			b.WriteByte(':')
-			if err := writeValue(b, item); err != nil {
+			if err := writeValue(b, x[k]); err != nil {
 				return err
 			}
 		}
@@ -132,9 +136,9 @@ func writeValue(b *strings.Builder, v any) error {
 	return nil
 }
 
-// writeASCIIString writes a JSON string literal in which every byte outside
-// printable ASCII is escaped.
-func writeASCIIString(b *strings.Builder, s string) {
+// writeJSONString writes a JSON string literal using UTF-8 verbatim for every
+// character that JSON does not require to be escaped.
+func writeJSONString(b *strings.Builder, s string) {
 	b.WriteByte('"')
 	for _, r := range s {
 		switch r {
@@ -142,6 +146,10 @@ func writeASCIIString(b *strings.Builder, s string) {
 			b.WriteString(`\"`)
 		case '\\':
 			b.WriteString(`\\`)
+		case '\b':
+			b.WriteString(`\b`)
+		case '\f':
+			b.WriteString(`\f`)
 		case '\n':
 			b.WriteString(`\n`)
 		case '\r':
@@ -149,15 +157,8 @@ func writeASCIIString(b *strings.Builder, s string) {
 		case '\t':
 			b.WriteString(`\t`)
 		default:
-			if r >= 0x20 && r < 0x7f {
+			if r >= 0x20 {
 				b.WriteRune(r)
-				continue
-			}
-			if r > 0xffff {
-				r -= 0x10000
-				hi := 0xd800 + (r >> 10)
-				lo := 0xdc00 + (r & 0x3ff)
-				fmt.Fprintf(b, `\u%04x\u%04x`, hi, lo)
 				continue
 			}
 			fmt.Fprintf(b, `\u%04x`, r)

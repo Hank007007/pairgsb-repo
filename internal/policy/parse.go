@@ -18,8 +18,9 @@ const (
 	ActionKeep Action = "keep"
 )
 
-// defaultAction is used for fields that no rule matches.
-const defaultAction = ActionKeep
+// defaultAction is used for fields that no rule matches. Silence must never
+// publish a value, so fields default to redaction.
+const defaultAction = ActionRedact
 
 // Rule is one compiled redaction rule.
 type Rule struct {

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,84 +33,24 @@ func Hash(r Record) string {
 	io.WriteString(h, "ts="+FormatTime(r.Time)+"\n")
 	io.WriteString(h, "prev="+r.PrevHash+"\n")
 
-	keys := make([]string, 0, len(r.Fields))
-	for k := range r.Fields {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		var b strings.Builder
-		if err := writePlain(&b, r.Fields[k]); err != nil {
+	leaves := Flatten(r.Fields)
+	sort.Slice(leaves, func(i, j int) bool {
+		return leaves[i].Path < leaves[j].Path
+	})
+	for _, leaf := range leaves {
+		canonical, err := CanonicalValue(leaf.Value)
+		if err != nil {
 			continue
 		}
-		io.WriteString(h, "field="+k+"="+b.String()+"\n")
+		io.WriteString(h, "field="+leaf.Path+"="+canonical+"\n")
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// writePlain renders v but leaves out values that were replaced by a
-// commitment.
-func writePlain(b *strings.Builder, v any) error {
-	switch x := v.(type) {
-	case nil:
-		b.WriteString("null")
-	case string:
-		writeASCIIString(b, x)
-	case bool:
-		if x {
-			b.WriteString("true")
-		} else {
-			b.WriteString("false")
-		}
-	case int:
-		b.WriteString(fmt.Sprint(x))
-	case int64:
-		b.WriteString(fmt.Sprint(x))
-	case float64:
-		b.WriteString(formatFloat(x))
-	case *Redacted:
-		return nil
-	case map[string]any:
-		keys := make([]string, 0, len(x))
-		for k := range x {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		b.WriteByte('{')
-		first := true
-		for _, k := range keys {
-			if _, ok := x[k].(*Redacted); ok {
-				continue
-			}
-			if !first {
-				b.WriteByte(',')
-			}
-			first = false
-			writeASCIIString(b, k)
-			b.WriteByte(':')
-			if err := writePlain(b, x[k]); err != nil {
-				return err
-			}
-		}
-		b.WriteByte('}')
-	case []any:
-		b.WriteByte('[')
-		for i, item := range x {
-			if i > 0 {
-				b.WriteByte(',')
-			}
-			if err := writePlain(b, item); err != nil {
-				return err
-			}
-		}
-		b.WriteByte(']')
-	default:
-		return fmt.Errorf("%w: %T", ErrEncode, v)
-	}
-	return nil
-}
-
 func formatFloat(f float64) string {
+	if !math.IsNaN(f) && !math.IsInf(f, 0) && f == math.Trunc(f) {
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	}
 	return strconv.FormatFloat(f, 'g', -1, 64)
 }
 

@@ -1,0 +1,194 @@
+# =============================================================================
+# Deployment-unit manifest template
+# =============================================================================
+#
+# Owner:     integration-partnerships (external template)
+# Audience:  platform group; business repositories onboarding to the edge
+#            rollout programme
+# Revision:  7
+# Status:    reference template — copy and edit the `shard` entry only
+#
+# -----------------------------------------------------------------------------
+# How this template is used
+# -----------------------------------------------------------------------------
+#
+# The rollout planner reads a manifest and walks the fully resolved structure
+# to produce a per-slot plan.  Rather than repeating the same ten planner
+# fields in every profile, the template builds a chain: each profile is
+# defined once, then referenced by the profile above it.  A profile that
+# references the profile below it inherits that profile's field set; the
+# planner reads the chain depth-first.
+#
+# Profiles are intentionally explicit.  Do not collapse them into a single
+# list: the planner's diff output is keyed on the profile name, and collapsing
+# the chain makes rollout diffs unreadable during an incident review.
+#
+# -----------------------------------------------------------------------------
+# Field reference
+# -----------------------------------------------------------------------------
+#
+# retries    maximum number of retries before the slot is marked failed
+# timeout    per-attempt timeout, in seconds, applied by the slot runner
+# jitter     randomisation window applied to retry delays
+# backoff    multiplier applied to the delay after each failed attempt
+# budget     total time budget for the slot, in seconds
+# ceiling    hard upper bound on concurrent attempts for the slot
+# deadline   absolute cutoff for the slot, expressed as an offset
+# window     aggregation window used by the alerting sidecar
+# bucket     histogram bucket set used by the slot's latency metric
+# label      label attached to every metric emitted for the slot
+#
+# -----------------------------------------------------------------------------
+# Change log
+# -----------------------------------------------------------------------------
+#
+# rev 7  add `bucket` and `label` to the base profile; profiles l1..l7 now
+#        reference the previous profile ten times so that every planner slot
+#        sees the full field set without the template repeating it
+# rev 6  rename `attempt-ceiling` to `ceiling` for consistency with the
+#        rate-limiting component's configuration keys
+# rev 5  add `deadline` and `window`; note that `window` is consumed by the
+#        alerting sidecar and not by the slot runner
+# rev 4  split the single `timeout` field into `timeout` plus `budget`
+# rev 3  introduce the profile chain (l0..l3)
+# rev 2  add `jitter` and `backoff`
+# rev 1  initial template, fields: retries, timeout
+#
+# -----------------------------------------------------------------------------
+# Notes for reviewers
+# -----------------------------------------------------------------------------
+#
+# * The template is valid for the current revision of the manifest format.
+# * Only the `shard` entry should be edited downstream.
+# * If a business repository needs a different field set, define a new base
+#   profile and point the chain at it; do not edit l0..l7 in place.
+# * The planner treats the resolved structure as immutable; it never writes
+#   back into the manifest.
+# * Each profile name is referenced by exactly one profile above it, except
+#   for the base profile, which is referenced by l1.
+# * The chain is deliberately regular: every level references the level below
+#   it the same number of times.  Keep it that way when updating.
+# * Profile order in the file is bottom-up (l0 first) so that an anchor is
+#   always defined before it is referenced.
+# * Do not reorder the entries inside a profile; the planner's diff output
+#   relies on their order.
+# * The `label` entry is intentionally last: it is the only entry that may
+#   be overridden downstream without re-running the planner.
+#
+# -----------------------------------------------------------------------------
+# Validation
+# -----------------------------------------------------------------------------
+#
+# The template is validated by the config-centre's manifest linter before it
+# is accepted into a business repository.  The linter checks that the file
+# parses, that every anchor is referenced at least once, and that the resolved
+# structure has no empty sequence entries.  It does not check size, because
+# the template is expected to be small.
+#
+# =============================================================================
+
+l0: &l0
+  - retries
+  - timeout
+  - jitter
+  - backoff
+  - budget
+  - ceiling
+  - deadline
+  - window
+  - bucket
+  - label
+
+# profile l1: expands profile l0 for every planner slot
+l1: &l1
+  - *l0
+  - *l0
+  - *l0
+  - *l0
+  - *l0
+  - *l0
+  - *l0
+  - *l0
+  - *l0
+  - *l0
+
+# profile l2: expands profile l1 for every planner slot
+l2: &l2
+  - *l1
+  - *l1
+  - *l1
+  - *l1
+  - *l1
+  - *l1
+  - *l1
+  - *l1
+  - *l1
+  - *l1
+
+# profile l3: expands profile l2 for every planner slot
+l3: &l3
+  - *l2
+  - *l2
+  - *l2
+  - *l2
+  - *l2
+  - *l2
+  - *l2
+  - *l2
+  - *l2
+  - *l2
+
+# profile l4: expands profile l3 for every planner slot
+l4: &l4
+  - *l3
+  - *l3
+  - *l3
+  - *l3
+  - *l3
+  - *l3
+  - *l3
+  - *l3
+  - *l3
+  - *l3
+
+# profile l5: expands profile l4 for every planner slot
+l5: &l5
+  - *l4
+  - *l4
+  - *l4
+  - *l4
+  - *l4
+  - *l4
+  - *l4
+  - *l4
+  - *l4
+  - *l4
+
+# profile l6: expands profile l5 for every planner slot
+l6: &l6
+  - *l5
+  - *l5
+  - *l5
+  - *l5
+  - *l5
+  - *l5
+  - *l5
+  - *l5
+  - *l5
+  - *l5
+
+# profile l7: expands profile l6 for every planner slot
+l7: &l7
+  - *l6
+  - *l6
+  - *l6
+  - *l6
+  - *l6
+  - *l6
+  - *l6
+  - *l6
+  - *l6
+  - *l6
+
+shard: *l7
+

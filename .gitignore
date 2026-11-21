@@ -1,0 +1,27 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test and coverage artifacts
+*.test
+*.out
+coverage.*
+/profile.out
+
+# Go workspace / tooling caches
+/go.work
+/go.work.sum
+.vendor/
+vendor/
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

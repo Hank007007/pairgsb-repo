@@ -1,0 +1,12 @@
+{
+  "name": "schemabind-gate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Request validation layer for an API gateway",
+  "main": "src/http/server.js",
+  "scripts": {
+    "start": "node src/http/server.js",
+    "test": "node --test"
+  },
+  "license": "UNLICENSED"
+}

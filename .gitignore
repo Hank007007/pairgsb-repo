@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+*.log
+.DS_Store
+Thumbs.db
+.c8_output/
+.nyc_output/
+tmp/
+.build.prompt.txt

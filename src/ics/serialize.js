@@ -15,13 +15,33 @@ function utcStamp(date) {
 }
 
 /**
- * Format a Date as a local floating timestamp (no zone suffix).
+ * Format a Date as the wall-clock time observed in the given IANA zone.
  *
  * @param {Date} date
+ * @param {string} timeZone
  * @returns {string}
  */
-function localStamp(date) {
-  return utcStamp(date).replace(/Z$/, '');
+function localStamp(date, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type).value;
+  return (
+    get('year') +
+    get('month') +
+    get('day') +
+    'T' +
+    String(get('hour') === '24' ? '00' : get('hour')) +
+    get('minute') +
+    get('second')
+  );
 }
 
 /**
@@ -34,7 +54,7 @@ function localStamp(date) {
  */
 function line(name, params, value) {
   const rendered = paramList(params);
-  if (rendered) return name + ':' + rendered + value;
+  if (rendered) return name + ';' + rendered + ':' + value;
   return name + ':' + value;
 }
 
@@ -46,9 +66,9 @@ function line(name, params, value) {
  */
 export function buildEvent(event) {
   const {
-    title = '',
-    location = '',
-    description = '',
+    title,
+    location,
+    description,
     organizer = null,
     attendees = [],
     start,
@@ -67,29 +87,29 @@ export function buildEvent(event) {
   out.push(line('DTSTAMP', null, utcStamp(new Date())));
 
   const dtParams = timeZone ? new Map([['TZID', timeZone]]) : null;
-  out.push(line('DTSTART', dtParams, timeZone ? localStamp(start) : utcStamp(start)));
-  out.push(line('DTEND', dtParams, timeZone ? localStamp(end) : utcStamp(end)));
+  out.push(line('DTSTART', dtParams, timeZone ? localStamp(start, timeZone) : utcStamp(start)));
+  out.push(line('DTEND', dtParams, timeZone ? localStamp(end, timeZone) : utcStamp(end)));
 
   if (title !== undefined && title !== null) {
     out.push(line('SUMMARY', null, escapeText(title)));
   }
-  if (location) {
+  if (location !== undefined && location !== null) {
     out.push(line('LOCATION', null, escapeText(location)));
   }
-  if (description) {
+  if (description !== undefined && description !== null) {
     out.push(line('DESCRIPTION', null, escapeText(description)));
   }
 
   if (organizer) {
-    const params = new Map([['CN', escapeText(organizer.name)]]);
+    const params = new Map([['CN', escapeText(organizer.name ?? '')]]);
     out.push(line('ORGANIZER', params, 'mailto:' + organizer.email));
   }
 
   for (const attendee of attendees) {
     const params = new Map();
-    params.set('CN', escapeText(attendee.name));
+    params.set('CN', escapeText(attendee.name ?? ''));
     if (attendee.role) {
-      params.set('ROLE', Array.isArray(attendee.role) ? attendee.role : [attendee.role]);
+      params.set('ROLE', attendee.role);
     }
     out.push(line('ATTENDEE', params, 'mailto:' + attendee.email));
   }
@@ -106,5 +126,5 @@ export function buildEvent(event) {
 
   out.push('END:VEVENT');
 
-  return out.map((contentLine) => foldLine(contentLine + '\r\n')).join('');
+  return out.map((contentLine) => foldLine(contentLine) + '\r\n').join('');
 }

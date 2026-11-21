@@ -11,7 +11,9 @@ export function escapeText(value) {
   if (value === undefined || value === null) return '';
   return String(value)
     .replace(/\\/g, '\\\\')
-    .replace(/;/g, '\\;');
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r\n|\r|\n/g, '\\n');
 }
 
 /**
@@ -23,10 +25,42 @@ export function escapeText(value) {
  */
 export function foldLine(line) {
   const text = String(line);
-  if (text.length <= LINE_LIMIT) return text;
-  const chunks = [];
-  for (let i = 0; i < text.length; i += LINE_LIMIT) {
-    chunks.push(text.slice(i, i + LINE_LIMIT));
+  if (Buffer.byteLength(text, 'utf8') <= LINE_LIMIT) return text;
+
+  const chars = Array.from(text);
+  const tokens = [];
+  for (let i = 0; i < chars.length; i += 1) {
+    const ch = chars[i];
+    if (
+      ch === '\\' &&
+      i + 1 < chars.length &&
+      (chars[i + 1] === '\\' ||
+        chars[i + 1] === ';' ||
+        chars[i + 1] === ',' ||
+        chars[i + 1] === 'n')
+    ) {
+      tokens.push(ch + chars[i + 1]);
+      i += 1;
+    } else {
+      tokens.push(ch);
+    }
   }
-  return chunks.join('\r\n');
+
+  const physical = [];
+  let current = '';
+  let currentBytes = 0;
+  let capacity = LINE_LIMIT;
+  for (const token of tokens) {
+    const size = Buffer.byteLength(token, 'utf8');
+    if (currentBytes + size > capacity) {
+      physical.push(current);
+      current = '';
+      currentBytes = 0;
+      capacity = LINE_LIMIT - 1;
+    }
+    current += token;
+    currentBytes += size;
+  }
+  physical.push(current);
+  return physical.join('\r\n ');
 }

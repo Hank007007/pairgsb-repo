@@ -1,23 +1,49 @@
-import { escapeText } from '../ics/text.js';
 import { buildEvent } from '../ics/serialize.js';
-import { parseRRule, expandOccurrences } from '../ics/recur.js';
+import {
+  parseRRule,
+  expandOccurrences,
+  toRRuleString,
+  isKnownZone,
+  MAX_INSTANCES,
+} from '../ics/recur.js';
 import { buildEnvelope } from '../mime/envelope.js';
 
 const DEFAULT_DURATION_MINUTES = 30;
 const DEFAULT_WINDOW_DAYS = 90;
-const MAX_INSTANCES = 500; // same ceiling as docs/recur.md §2
+const MAIL_ADDRESS = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
+
+function fail(message) {
+  throw new TypeError(message);
+}
 
 /**
- * Coerce an incoming attendee record into the shape used by the serializer.
+ * Validate a syntactically usable mail address.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+function requireEmail(value) {
+  const address = value === undefined || value === null ? '' : String(value);
+  if (address.length === 0 || address.length > 254 || !MAIL_ADDRESS.test(address)) {
+    fail(`invalid e-mail address: ${address || '(empty)'}`);
+  }
+  return address;
+}
+
+/**
+ * Coerce an attendee record into the validated triple used by the renderer.
  *
  * @param {object} raw
  * @returns {{ name: string, email: string, role: string }}
  */
 function parseAttendee(raw) {
   const source = raw || {};
+  if (source.role !== undefined && typeof source.role !== 'string') {
+    fail('an attendee has exactly one role supplied as a string');
+  }
   return {
     name: source.name === undefined || source.name === null ? '' : String(source.name),
-    email: source.email === undefined || source.email === null ? '' : String(source.email),
+    email: requireEmail(source.email),
     role: source.role || 'REQ-PARTICIPANT',
   };
 }
@@ -31,6 +57,18 @@ function parseAttendee(raw) {
  */
 function addMinutes(date, minutes) {
   return new Date(date.getTime() + minutes * 60 * 1000);
+}
+
+function requireDate(value, label) {
+  if (value === undefined || value === null || value === '') return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) fail(`${label} is not a valid date`);
+  return date;
+}
+
+function optionalText(value) {
+  if (value === undefined || value === null) return undefined;
+  return String(value);
 }
 
 /**
@@ -61,84 +99,118 @@ function wrapCalendar(event) {
  * @returns {object}
  */
 export function handleInvite(payload) {
-  if (!payload || typeof payload !== 'object') {
-    throw new TypeError('invite payload must be an object');
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    fail('invite payload must be an object');
   }
-  if (!payload.start) {
-    throw new TypeError('invite payload requires a start time');
+  if (!payload.start) fail('invite payload requires a start time');
+
+  const start = requireDate(payload.start, 'start');
+
+  let durationMinutes = DEFAULT_DURATION_MINUTES;
+  if (payload.durationMinutes !== undefined && payload.durationMinutes !== null) {
+    durationMinutes = Number(payload.durationMinutes);
+    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+      fail('durationMinutes must be a positive number');
+    }
   }
 
-  const start = new Date(payload.start);
-  if (Number.isNaN(start.getTime())) {
-    throw new TypeError('start time is not a valid date');
+  const explicitEnd = requireDate(payload.end, 'end');
+  const end = explicitEnd ?? addMinutes(start, durationMinutes);
+  if (end <= start) fail('end must be after start');
+
+  if (
+    payload.sequence !== undefined &&
+    payload.sequence !== null &&
+    (!Number.isInteger(payload.sequence) || payload.sequence < 0)
+  ) {
+    fail('sequence must be a non-negative integer');
   }
 
-  const durationMinutes = Number.isFinite(Number(payload.durationMinutes))
-    ? Number(payload.durationMinutes)
-    : DEFAULT_DURATION_MINUTES;
-  const end = payload.end ? new Date(payload.end) : addMinutes(start, durationMinutes);
+  const timeZone = payload.timeZone ? String(payload.timeZone) : null;
+  if (timeZone && !isKnownZone(timeZone)) {
+    fail(`time zone ${timeZone} is not a recognised IANA zone`);
+  }
 
   const organizer = payload.organizer
     ? {
-        name: payload.organizer.name ?? '',
-        email: payload.organizer.email ?? '',
+        name: payload.organizer.name === undefined || payload.organizer.name === null
+          ? ''
+          : String(payload.organizer.name),
+        email: requireEmail(payload.organizer.email),
       }
     : null;
 
   const attendees = Array.isArray(payload.attendees)
     ? payload.attendees.map(parseAttendee)
-    : [];
+    : payload.attendees === undefined
+      ? []
+      : fail('attendees must be an array');
 
   const attachments = Array.isArray(payload.attachments)
     ? payload.attachments.map((item) => ({
-        description: item?.description ?? '',
+        description: item?.description === undefined || item?.description === null
+          ? ''
+          : String(item.description),
         type: item?.type ?? 'text/plain',
         url: item?.url ?? '',
         altRep: item?.altRep ?? '',
       }))
-    : [];
+    : payload.attachments === undefined
+      ? []
+      : fail('attachments must be an array');
 
-  const rule = payload.recurrence || null;
-  const parsedRule = rule ? parseRRule(rule) : null;
-
-  const windowEnd = payload.windowEnd
-    ? new Date(payload.windowEnd)
-    : addMinutes(start, DEFAULT_WINDOW_DAYS * 24 * 60);
-
-  let occurrences;
-  if (parsedRule) {
-    occurrences = expandOccurrences(parsedRule, { start, end: windowEnd }, payload.timeZone);
-  } else {
-    occurrences = [start];
+  for (const attachment of attachments) {
+    if (attachment.altRep && /[\r\n]/.test(attachment.altRep)) {
+      fail('ALTREP values must not contain a line break');
+    }
   }
 
+  if (
+    payload.recurrence !== undefined &&
+    payload.recurrence !== null &&
+    typeof payload.recurrence !== 'string'
+  ) {
+    fail('recurrence must be an RRULE string');
+  }
+  const rawRule = payload.recurrence || null;
+  const parsedRule = rawRule ? parseRRule(rawRule, timeZone) : null;
+  const rule = parsedRule ? toRRuleString(parsedRule) : null;
+
+  const windowEnd =
+    requireDate(payload.windowEnd, 'windowEnd') ??
+    addMinutes(start, DEFAULT_WINDOW_DAYS * 24 * 60);
+  if (windowEnd <= start) fail('windowEnd must be after start');
+
+  const occurrences = parsedRule
+    ? expandOccurrences(parsedRule, { start, end: windowEnd }, timeZone)
+    : [start];
+
   if (occurrences.length > MAX_INSTANCES) {
-    console.warn(
-      'invite series has ' + occurrences.length + ' occurrences, above the configured ceiling',
-    );
+    fail(`expansion exceeds the limit of ${MAX_INSTANCES} instances`);
   }
 
   const busyMinutes = occurrences.length * durationMinutes;
 
   const uid = payload.uid || 'invite-' + start.getTime() + '@invitefence.local';
   const ics = wrapCalendar({
-    title: payload.title ?? '',
-    location: payload.location ?? '',
-    description: payload.description ?? '',
+    title: optionalText(payload.title),
+    location: optionalText(payload.location),
+    description: optionalText(payload.description),
     organizer,
     attendees,
     start,
     end,
     uid,
     sequence: payload.sequence ?? 0,
-    timeZone: payload.timeZone || null,
+    timeZone,
     rule,
     attachments,
   });
 
+  const subject = payload.title ? String(payload.title) : 'Meeting invitation';
   const envelope = buildEnvelope({
     calendar: ics,
-    subject: payload.title || 'Meeting invitation',
+    subject,
     attachment: attachments[0] || null,
   });
 

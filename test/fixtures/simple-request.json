@@ -1,0 +1,18 @@
+{
+  "title": "Sprint review",
+  "location": "Room 1",
+  "description": "Weekly check-in",
+  "organizer": {
+    "name": "Alice",
+    "email": "alice@example.com"
+  },
+  "attendees": [
+    {
+      "name": "Alice",
+      "email": "alice@example.com",
+      "role": "CHAIR"
+    }
+  ],
+  "start": "2026-03-02T09:00:00.000Z",
+  "durationMinutes": 30
+}

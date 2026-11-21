@@ -1,0 +1,39 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# build products
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# virtual environments
+.venv/
+venv/
+env/
+
+# editors and OS files
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# local runtime data
+archive/
+*.pickle
+
+# local workspace notes
+.build.prompt.txt
+
+# local scratch instructions
+.build.prompt.txt

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rotseal"
+version = "0.1.0"
+description = "Rotate, seal and verify local NDJSON application logs"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+rotseal = "rotseal.cli:main"
+
+[tool.setuptools]
+packages = ["rotseal"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

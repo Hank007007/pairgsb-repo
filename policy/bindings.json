@@ -1,0 +1,62 @@
+{
+  "bindings": [
+    {
+      "members": ["alice"],
+      "role": "support",
+      "target": "svc-report",
+      "conditions": {}
+    },
+    {
+      "members": ["bob"],
+      "role": "support",
+      "target": "svc-report",
+      "conditions": {}
+    },
+    {
+      "members": ["alice"],
+      "role": "billing-ops",
+      "target": "svc-billing",
+      "conditions": {
+        "tenant": "finance",
+        "time_window": {
+          "start": "09:00",
+          "end": "18:00",
+          "days": ["mon", "tue", "wed", "thu", "fri"],
+          "timezone": "UTC"
+        },
+        "resource_label": {"env": "prod"},
+        "source_network": ["10.20.0.0/16", "10.30.0.0/16"]
+      }
+    },
+    {
+      "members": ["carol"],
+      "role": "billing-ops",
+      "target": "svc-billing",
+      "conditions": {}
+    },
+    {
+      "members": ["alice"],
+      "role": "delegate",
+      "target": "bob",
+      "conditions": {}
+    },
+    {
+      "members": ["bob"],
+      "role": "delegate",
+      "target": "alice",
+      "conditions": {}
+    },
+    {
+      "members": ["alice"],
+      "role": "delegate",
+      "target": "carol",
+      "conditions": {}
+    },
+    {
+      "members": ["alice"],
+      "role": "delegate",
+      "target": "dave",
+      "conditions": {}
+    }
+  ]
+}

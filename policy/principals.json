@@ -1,0 +1,67 @@
+{
+  "principals": {
+    "alice": {
+      "kind": "user",
+      "scopes": ["documents:read", "documents:write", "billing:read"],
+      "max_session_seconds": 3600,
+      "permissions": [
+        {"action": "documents:read", "resource": "doc/*"},
+        {"action": "documents:write", "resource": "doc/*"},
+        {"action": "billing:read", "resource": "invoice/*"}
+      ]
+    },
+    "bob": {
+      "kind": "user",
+      "scopes": [
+        "documents:read",
+        "documents:write",
+        "billing:read",
+        "billing:write",
+        "admin:read",
+        "admin:write"
+      ],
+      "max_session_seconds": 7200,
+      "permissions": [
+        {"action": "documents:*", "resource": "*"},
+        {"action": "billing:*", "resource": "*"},
+        {"action": "admin:*", "resource": "*"}
+      ]
+    },
+    "carol": {
+      "kind": "user",
+      "scopes": ["billing:read", "billing:write", "documents:read"],
+      "max_session_seconds": 1800,
+      "permissions": [
+        {"action": "billing:read", "resource": "invoice/*"},
+        {"action": "billing:write", "resource": "invoice/*"},
+        {"action": "documents:read", "resource": "report/*"}
+      ]
+    },
+    "dave": {
+      "kind": "user",
+      "scopes": ["documents:read", "reports:export"],
+      "max_session_seconds": 1200,
+      "permissions": [
+        {"action": "documents:read", "resource": "archive/*"},
+        {"action": "reports:export", "resource": "report/*"}
+      ]
+    },
+    "svc-report": {
+      "kind": "service_account",
+      "scopes": ["documents:read"],
+      "max_session_seconds": 3600,
+      "permissions": [
+        {"action": "documents:read", "resource": "report/*"}
+      ]
+    },
+    "svc-billing": {
+      "kind": "service_account",
+      "scopes": ["billing:read", "billing:write"],
+      "max_session_seconds": 900,
+      "permissions": [
+        {"action": "billing:read", "resource": "invoice/*"},
+        {"action": "billing:write", "resource": "invoice/*"}
+      ]
+    }
+  }
+}

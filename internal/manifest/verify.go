@@ -23,11 +23,15 @@ func SigningBytes(m *Manifest) ([]byte, error) {
 	}
 	body := m.raw.Clone()
 	body.Delete("sig")
+	body.Delete("key_id")
 	return cbor.Encode(body)
 }
 
 // Verify checks the manifest signature against pub.
 func Verify(m *Manifest, pub ed25519.PublicKey) error {
+	if m == nil {
+		return fmt.Errorf("%w: no manifest", ErrManifestInvalid)
+	}
 	if len(pub) != ed25519.PublicKeySize {
 		return fmt.Errorf("%w: bad public key length %d", ErrManifestInvalid, len(pub))
 	}

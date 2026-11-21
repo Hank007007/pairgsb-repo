@@ -5,10 +5,11 @@ package cbor
 import (
 	"fmt"
 	"math"
+	"sort"
+	"unicode/utf8"
 )
 
-// Encode serialises v. Maps are written entry by entry in the order the Map
-// records them.
+// Encode serialises v. Map keys are written in canonical order.
 func Encode(v any) ([]byte, error) {
 	e := &encoder{}
 	if err := e.value(v); err != nil {
@@ -39,6 +40,8 @@ func (e *encoder) value(v any) error {
 		} else {
 			e.head(MajorNegative, uint64(-(x + 1)))
 		}
+	case negativeInteger:
+		e.head(MajorNegative, uint64(x))
 	case int:
 		return e.value(int64(x))
 	case []byte:
@@ -56,7 +59,11 @@ func (e *encoder) value(v any) error {
 		}
 	case *Map:
 		e.head(MajorMap, uint64(x.Len()))
-		for _, k := range x.Keys() {
+		keys := append([]string(nil), x.Keys()...)
+		sort.Slice(keys, func(i, j int) bool {
+			return compareBytes(encodedTextKey(keys[i]), encodedTextKey(keys[j])) < 0
+		})
+		for _, k := range keys {
 			value, _ := x.Get(k)
 			e.head(MajorText, uint64(len(k)))
 			e.buf = append(e.buf, k...)
@@ -68,6 +75,12 @@ func (e *encoder) value(v any) error {
 		return fmt.Errorf("cbor: cannot encode %T", v)
 	}
 	return nil
+}
+
+func encodedTextKey(s string) []byte {
+	e := &encoder{}
+	e.head(MajorText, uint64(len(s)))
+	return append(e.buf, s...)
 }
 
 func (e *encoder) head(major MajorType, n uint64) {
@@ -104,7 +117,7 @@ func compareBytes(a, b []byte) int {
 // follows the ordering rules in docs/manifest-cbor.md section 3.
 func IsCanonical(data []byte) bool {
 	w := &canonicalWalker{data: data}
-	if err := w.walk(true); err != nil {
+	if err := w.walk(1); err != nil {
 		return false
 	}
 	return w.pos == len(data)
@@ -115,7 +128,10 @@ type canonicalWalker struct {
 	pos  int
 }
 
-func (w *canonicalWalker) walk(top bool) error {
+func (w *canonicalWalker) walk(depth int) error {
+	if depth > MaxDepth {
+		return errAt(w.pos, "nesting depth exceeds %d", MaxDepth)
+	}
 	if w.pos >= len(w.data) {
 		return errAt(w.pos, "unexpected end of input")
 	}
@@ -131,41 +147,57 @@ func (w *canonicalWalker) walk(top bool) error {
 		if err != nil {
 			return err
 		}
-		if n > 1<<32 {
-			return errAt(start, "integer %d is outside the accepted range", n)
+		if err := checkShortestInteger(additional, n, start); err != nil {
+			return err
 		}
 		return nil
 
 	case MajorBytes:
 		if additional == AdditionalBreak {
-			return w.walkChunks(MajorBytes)
+			return errAt(start, "indefinite-length byte strings are not supported")
 		}
 		n, err := w.argument(additional, start)
 		if err != nil {
+			return err
+		}
+		if err := checkShortestInteger(additional, n, start); err != nil {
 			return err
 		}
 		return w.skip(n, start)
 
 	case MajorText:
 		if additional == AdditionalBreak {
-			return w.walkChunks(MajorText)
+			return errAt(start, "indefinite-length text strings are not supported")
 		}
 		n, err := w.argument(additional, start)
 		if err != nil {
 			return err
 		}
-		return w.skip(n, start)
+		if err := checkShortestInteger(additional, n, start); err != nil {
+			return err
+		}
+		if n > uint64(len(w.data)-w.pos) {
+			return errAt(start, "declared length %d exceeds remaining input", n)
+		}
+		if !utf8.Valid(w.data[w.pos : w.pos+int(n)]) {
+			return errAt(start, "text string is not valid UTF-8")
+		}
+		w.pos += int(n)
+		return nil
 
 	case MajorArray:
 		if additional == AdditionalBreak {
-			return w.walkItems(false)
+			return errAt(start, "indefinite-length arrays are not supported")
 		}
 		n, err := w.argument(additional, start)
 		if err != nil {
 			return err
 		}
+		if err := checkShortestInteger(additional, n, start); err != nil {
+			return err
+		}
 		for i := uint64(0); i < n; i++ {
-			if err := w.walk(false); err != nil {
+			if err := w.walk(depth + 1); err != nil {
 				return err
 			}
 		}
@@ -173,13 +205,16 @@ func (w *canonicalWalker) walk(top bool) error {
 
 	case MajorMap:
 		if additional == AdditionalBreak {
-			return w.walkItems(true)
+			return errAt(start, "indefinite-length maps are not supported")
 		}
 		n, err := w.argument(additional, start)
 		if err != nil {
 			return err
 		}
-		return w.mapEntries(n, top)
+		if err := checkShortestInteger(additional, n, start); err != nil {
+			return err
+		}
+		return w.mapEntries(n, depth)
 
 	case MajorTag:
 		return errAt(start, "tagged values are not supported")
@@ -196,65 +231,49 @@ func (w *canonicalWalker) walk(top bool) error {
 	return errAt(start, "unsupported major type %d", major)
 }
 
-func (w *canonicalWalker) mapEntries(n uint64, top bool) error {
-	var prev []byte
-	for i := uint64(0); i < n; i++ {
-		keyStart := w.pos
-		if err := w.walk(false); err != nil {
-			return err
-		}
-		if top {
-			key := w.data[keyStart:w.pos]
-			if prev != nil && compareBytes(prev, key) > 0 {
-				return errAt(keyStart, "map keys are not in canonical order")
-			}
-			prev = key
-		}
-		if err := w.walk(false); err != nil {
-			return err
-		}
+func checkShortestInteger(additional byte, n uint64, start int) error {
+	var want byte
+	switch {
+	case n < 24:
+		want = byte(n)
+	case n <= math.MaxUint8:
+		want = AdditionalOneByte
+	case n <= math.MaxUint16:
+		want = AdditionalTwoBytes
+	case n <= math.MaxUint32:
+		want = AdditionalFourByte
+	default:
+		want = AdditionalEightBye
+	}
+	if additional != want {
+		return errAt(start, "integer is not encoded in its shortest form")
 	}
 	return nil
 }
 
-func (w *canonicalWalker) walkChunks(want MajorType) error {
-	for {
+func (w *canonicalWalker) mapEntries(n uint64, depth int) error {
+	var prev []byte
+	for i := uint64(0); i < n; i++ {
+		keyStart := w.pos
 		if w.pos >= len(w.data) {
-			return errAt(w.pos, "unterminated string")
+			return errAt(w.pos, "unexpected end of input")
 		}
-		if w.data[w.pos] == MarkerBreak {
-			w.pos++
-			return nil
+		if MajorOf(w.data[w.pos]) != MajorText {
+			return errAt(w.pos, "map key must be a text string")
 		}
-		if MajorOf(w.data[w.pos]) != want {
-			return errAt(w.pos, "unexpected chunk type")
+		if err := w.walk(depth + 1); err != nil {
+			return err
 		}
-		if err := w.walk(false); err != nil {
+		key := w.data[keyStart:w.pos]
+		if prev != nil && compareBytes(prev, key) >= 0 {
+			return errAt(keyStart, "map keys are not in canonical order")
+		}
+		prev = key
+		if err := w.walk(depth + 1); err != nil {
 			return err
 		}
 	}
-}
-
-// walkItems walks the entries of an indefinite-length array, or the key/value
-// pairs of an indefinite-length map when pairs is true.
-func (w *canonicalWalker) walkItems(pairs bool) error {
-	for {
-		if w.pos >= len(w.data) {
-			return errAt(w.pos, "unterminated container")
-		}
-		if w.data[w.pos] == MarkerBreak {
-			w.pos++
-			return nil
-		}
-		if err := w.walk(false); err != nil {
-			return err
-		}
-		if pairs {
-			if err := w.walk(false); err != nil {
-				return err
-			}
-		}
-	}
+	return nil
 }
 
 func (w *canonicalWalker) argument(additional byte, start int) (uint64, error) {

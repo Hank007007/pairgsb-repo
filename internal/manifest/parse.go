@@ -3,6 +3,7 @@ package manifest
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"cborveil/internal/cbor"
 )
@@ -51,30 +52,29 @@ func Parse(data []byte) (*Manifest, error) {
 		return nil, fmt.Errorf("%w: top-level item is not a map", ErrMalformed)
 	}
 	root = mergeExtras(root)
-	hoistTargetExtras(root)
 
 	m := &Manifest{raw: root}
 
 	version, ok := textValue(root, "version")
-	if !ok {
+	if !ok || version == "" {
 		return nil, fmt.Errorf("%w: missing or invalid \"version\"", ErrMalformed)
 	}
 	m.Version = version
 
-	size, ok := intValue(root, "size")
-	if !ok {
+	size, ok := uintValue(root, "size")
+	if !ok || size <= 0 {
 		return nil, fmt.Errorf("%w: missing or invalid \"size\"", ErrMalformed)
 	}
 	m.Size = size
 
 	sig, ok := bytesValue(root, "sig")
-	if !ok {
+	if !ok || len(sig) != 64 {
 		return nil, fmt.Errorf("%w: missing or invalid \"sig\"", ErrMalformed)
 	}
 	m.Sig = sig
 
 	keyID, ok := textValue(root, "key_id")
-	if !ok {
+	if !ok || keyID == "" {
 		return nil, fmt.Errorf("%w: missing or invalid \"key_id\"", ErrMalformed)
 	}
 	m.KeyID = keyID
@@ -97,13 +97,12 @@ func Parse(data []byte) (*Manifest, error) {
 		if !ok {
 			return nil, fmt.Errorf("%w: target %d is not a map", ErrMalformed, i)
 		}
-		t, err := parseTarget(tm)
+		t, err := parseTarget(tm, m.Size)
 		if err != nil {
 			return nil, fmt.Errorf("target %d: %w", i, err)
 		}
-		if at, seen := positions[t.Model]; seen {
-			m.Targets[at] = t
-			continue
+		if _, seen := positions[t.Model]; seen {
+			return nil, fmt.Errorf("%w: duplicate target model %q", ErrManifestInvalid, t.Model)
 		}
 		positions[t.Model] = len(m.Targets)
 		m.Targets = append(m.Targets, t)
@@ -113,78 +112,45 @@ func Parse(data []byte) (*Manifest, error) {
 }
 
 // parseTarget maps one CBOR map to a Target.
-func parseTarget(m *cbor.Map) (Target, error) {
+func parseTarget(m *cbor.Map, manifestSize int64) (Target, error) {
 	m = mergeExtras(m)
 	var t Target
 
 	model, ok := textValue(m, "model")
-	if !ok {
+	if !ok || model == "" {
 		return t, fmt.Errorf("%w: missing or invalid \"model\"", ErrMalformed)
 	}
 	t.Model = model
 
 	url, ok := textValue(m, "url")
-	if !ok {
+	if !ok || url == "" {
 		return t, fmt.Errorf("%w: missing or invalid \"url\"", ErrMalformed)
 	}
 	t.URL = url
 
 	sum, ok := bytesValue(m, "sha256")
-	if !ok {
+	if !ok || len(sum) != 32 {
 		return t, fmt.Errorf("%w: missing or invalid \"sha256\"", ErrMalformed)
 	}
 	t.SHA256 = sum
 
-	size, ok := intValue(m, "size")
-	if !ok {
+	size, ok := uintValue(m, "size")
+	if !ok || size <= 0 {
 		return t, fmt.Errorf("%w: missing or invalid \"size\"", ErrMalformed)
 	}
 	t.Size = size
 
-	offset, ok := intValue(m, "offset")
+	offset, ok := uintValue(m, "offset")
 	if !ok {
 		return t, fmt.Errorf("%w: missing or invalid \"offset\"", ErrMalformed)
 	}
 	t.Offset = offset
 
+	if size > manifestSize || offset > manifestSize-size {
+		return t, fmt.Errorf("%w: target range exceeds manifest size", ErrManifestInvalid)
+	}
+
 	return t, nil
-}
-
-// targetKeys are the keys that belong to a target entry.
-var targetKeys = map[string]bool{
-	"model":  true,
-	"url":    true,
-	"sha256": true,
-	"size":   true,
-	"offset": true,
-}
-
-// hoistTargetExtras folds keys that are not part of the target schema into the
-// root map, so that forward-compatible target fields stay reachable from the
-// manifest.
-func hoistTargetExtras(root *cbor.Map) {
-	raw, ok := root.Get("targets")
-	if !ok {
-		return
-	}
-	list, ok := raw.([]any)
-	if !ok {
-		return
-	}
-	for _, item := range list {
-		tm, ok := item.(*cbor.Map)
-		if !ok {
-			continue
-		}
-		tm = mergeExtras(tm)
-		for _, k := range tm.Keys() {
-			if targetKeys[k] {
-				continue
-			}
-			v, _ := tm.Get(k)
-			root.Set(k, v)
-		}
-	}
 }
 
 // mergeExtras folds the repeated-key side table back into the visible map.
@@ -219,17 +185,14 @@ func bytesValue(m *cbor.Map, key string) ([]byte, bool) {
 	return b, ok
 }
 
-func intValue(m *cbor.Map, key string) (int64, bool) {
+func uintValue(m *cbor.Map, key string) (int64, bool) {
 	v, ok := m.Get(key)
 	if !ok {
 		return 0, false
 	}
-	switch n := v.(type) {
-	case uint64:
-		return int64(n), true
-	case int64:
-		return n, true
-	default:
+	n, ok := v.(uint64)
+	if !ok || n > math.MaxInt64 {
 		return 0, false
 	}
+	return int64(n), true
 }

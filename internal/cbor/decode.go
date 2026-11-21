@@ -1,6 +1,7 @@
 package cbor
 
 import (
+	"math"
 	"unicode/utf8"
 )
 
@@ -107,6 +108,10 @@ type decoder struct {
 	pos  int
 }
 
+// negativeInteger is a CBOR negative integer whose argument does not fit in
+// the int64 range. The represented value is -1-argument.
+type negativeInteger uint64
+
 // Decode parses one complete data item. Trailing bytes are an error.
 func Decode(data []byte) (any, error) {
 	if len(data) == 0 {
@@ -149,11 +154,14 @@ func (d *decoder) item(depth int) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		if n > math.MaxInt64 {
+			return negativeInteger(n), nil
+		}
 		return int64(^n), nil
 
 	case MajorBytes:
 		if additional == AdditionalBreak {
-			return d.indefiniteBytes(depth)
+			return nil, errAt(start, "indefinite-length byte strings are not supported")
 		}
 		n, err := d.argument(additional, start)
 		if err != nil {
@@ -167,7 +175,7 @@ func (d *decoder) item(depth int) (any, error) {
 
 	case MajorText:
 		if additional == AdditionalBreak {
-			return d.indefiniteText(depth)
+			return nil, errAt(start, "indefinite-length text strings are not supported")
 		}
 		n, err := d.argument(additional, start)
 		if err != nil {
@@ -184,7 +192,7 @@ func (d *decoder) item(depth int) (any, error) {
 
 	case MajorArray:
 		if additional == AdditionalBreak {
-			return d.indefiniteArray(depth)
+			return nil, errAt(start, "indefinite-length arrays are not supported")
 		}
 		n, err := d.argument(additional, start)
 		if err != nil {
@@ -202,7 +210,7 @@ func (d *decoder) item(depth int) (any, error) {
 
 	case MajorMap:
 		if additional == AdditionalBreak {
-			return d.indefiniteMap(depth)
+			return nil, errAt(start, "indefinite-length maps are not supported")
 		}
 		n, err := d.argument(additional, start)
 		if err != nil {
@@ -218,7 +226,7 @@ func (d *decoder) item(depth int) (any, error) {
 			if !ok {
 				return nil, errAt(start, "map key must be a text string")
 			}
-			value, err := d.item(depth)
+			value, err := d.item(depth + 1)
 			if err != nil {
 				return nil, err
 			}
@@ -378,7 +386,7 @@ func (d *decoder) indefiniteMap(depth int) (any, error) {
 			d.pos++
 			return out, nil
 		}
-		key, err := d.item(depth)
+		key, err := d.item(depth + 1)
 		if err != nil {
 			return nil, err
 		}
@@ -386,7 +394,7 @@ func (d *decoder) indefiniteMap(depth int) (any, error) {
 		if !ok {
 			return nil, errAt(start, "map key must be a text string")
 		}
-		value, err := d.item(depth)
+		value, err := d.item(depth + 1)
 		if err != nil {
 			return nil, err
 		}

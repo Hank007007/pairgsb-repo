@@ -1,16 +1,22 @@
 package manifest
 
-import "strings"
-
 // Select returns the target that applies to the device model.
 func Select(m *Manifest, deviceModel string) (*Target, error) {
 	if m == nil {
 		return nil, ErrManifestInvalid
 	}
+	var match *Target
 	for i := range m.Targets {
-		if strings.HasPrefix(m.Targets[i].Model, deviceModel) {
-			return &m.Targets[i], nil
+		if m.Targets[i].Model != deviceModel {
+			continue
 		}
+		if match != nil {
+			return nil, ErrManifestInvalid
+		}
+		match = &m.Targets[i]
 	}
-	return nil, ErrNoMatchingTarget
+	if match == nil {
+		return nil, ErrNoMatchingTarget
+	}
+	return match, nil
 }

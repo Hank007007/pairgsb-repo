@@ -16,6 +16,8 @@ from .util import (
     RotsealError,
     ensure_archive,
     isoformat_utc,
+    load_index,
+    load_tombstones,
     seal_filename,
     segment_filename,
     segments_dir,
@@ -27,11 +29,37 @@ from .util import (
 
 SEAL_VERSION = 1
 
+SIGNED_FIELDS = (
+    "version",
+    "archive_id",
+    "segment",
+    "segment_file",
+    "seq_start",
+    "seq_end",
+    "count",
+    "prev_tip",
+    "records_digest",
+    "sealed_length",
+    "first_ts",
+    "last_ts",
+    "key_id",
+    "alg",
+    "sealed_at",
+    "tip",
+)
 
-def _signed_payload(records_digest: str) -> bytes:
-    """Bytes handed to the signature function for a sealed segment."""
 
-    return str(records_digest).encode("utf-8")
+def signature_payload(seal_doc: dict) -> bytes:
+    """Canonical bytes covered by a segment signature.
+
+    Every field verification or retention relies on is included.  The
+    serialisation is independent of JSON key order and whitespace.
+    """
+
+    material = {name: seal_doc.get(name) for name in SIGNED_FIELDS}
+    return json.dumps(
+        material, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
 
 
 def _sign(secret: bytes, body: bytes) -> str:
@@ -39,6 +67,10 @@ def _sign(secret: bytes, body: bytes) -> str:
     import hmac
 
     return hmac.new(secret, body, hashlib.sha256).hexdigest()
+
+
+def signature_for(entry: dict, seal_doc: dict) -> str:
+    return _sign(keys_mod.secret_bytes(entry), signature_payload(seal_doc))
 
 
 def tip_for(number: int, seal_doc: dict) -> str:
@@ -73,22 +105,38 @@ def compute_digest(records: list) -> str:
 
 
 def read_records(path):
-    """Read an NDJSON segment into memory.
+    """Read and strictly validate an NDJSON segment.
 
-    Lines that do not decode are left out so a partially written tail does
-    not stop the segment from being processed.
+    Invalid UTF-8, invalid JSON and blank lines are errors.  Silently dropping
+    them would make the sidecar's ``count`` disagree with the amount of data
+    an auditor sees in the file.
     """
 
+    path = Path(path)
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise RotsealError(f"cannot read segment {path}: {exc}") from exc
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RotsealError(f"segment {path} is not valid UTF-8: {exc}") from exc
+
     records = []
-    text = Path(path).read_text(encoding="utf-8", errors="ignore")
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            raise RotsealError(f"segment {path} line {number} is blank")
         try:
-            records.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise RotsealError(
+                f"segment {path} line {number} is not valid JSON: {exc.msg}"
+            ) from exc
+        if not isinstance(record, dict):
+            raise RotsealError(
+                f"segment {path} line {number} is not a JSON object"
+            )
+        records.append(record)
     return records
 
 
@@ -99,7 +147,21 @@ def inspect_segment(path) -> dict:
     if not path.exists():
         raise RotsealError(f"missing segment: {path}")
     records = read_records(path)
-    seqs = [int(record.get("seq")) for record in records if "seq" in record]
+    seqs = []
+    for number, record in enumerate(records, start=1):
+        if "seq" not in record:
+            raise RotsealError(f"segment {path} line {number} has no seq field")
+        try:
+            seq = int(record["seq"])
+        except (TypeError, ValueError) as exc:
+            raise RotsealError(
+                f"segment {path} line {number} has a non-integer seq"
+            ) from exc
+        if seqs and seq != seqs[-1] + 1:
+            raise RotsealError(
+                f"segment {path} sequence {seqs[-1]} is not followed by {seq}"
+            )
+        seqs.append(seq)
     return {
         "count": len(records),
         "sealed_length": path.stat().st_size,
@@ -131,6 +193,8 @@ def seal_segment(
     if info["count"] == 0:
         raise RotsealError(f"cannot seal empty segment: {segment}")
 
+    archive_id = load_index(archive).get("archive_id")
+
     if key_id is None:
         entry = keys_mod.active_key(keyring)
     else:
@@ -138,12 +202,21 @@ def seal_segment(
         if entry is None:
             raise RotsealError(f"unknown key id: {key_id!r}")
 
-    signature = _sign(
-        keys_mod.secret_bytes(entry), _signed_payload(info["records_digest"])
-    )
+    if prev_tip is None and int(number) > 1:
+        predecessor = directory / seal_filename(int(number) - 1)
+        if predecessor.exists():
+            try:
+                predecessor_doc = json.loads(
+                    predecessor.read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError):
+                predecessor_doc = None
+            if isinstance(predecessor_doc, dict):
+                prev_tip = tip_for(int(number) - 1, predecessor_doc)
 
     seal_doc = {
         "version": SEAL_VERSION,
+        "archive_id": archive_id,
         "segment": int(number),
         "segment_file": segment.name,
         "seq_start": info["seq_start"],
@@ -157,9 +230,9 @@ def seal_segment(
         "key_id": str(entry["id"]),
         "alg": "hmac-sha256",
         "sealed_at": isoformat_utc(created_at or utcnow()),
-        "signature": signature,
     }
     seal_doc["tip"] = tip_for(number, seal_doc)
+    seal_doc["signature"] = signature_for(entry, seal_doc)
     sidecar = directory / seal_filename(number)
     write_json_atomic(sidecar, seal_doc)
     return seal_doc
@@ -180,20 +253,29 @@ def seal(archive, keyring: dict, key_id=None) -> list:
     directory = segments_dir(archive)
 
     sealed = []
-    tip = None
+    tip_by_number = {}
+    for item in load_tombstones(archive):
+        try:
+            tip_by_number[int(item["number"])] = item.get("tip")
+        except (KeyError, TypeError, ValueError):
+            continue
     for number in sorted(entries):
         sidecar = directory / seal_filename(number)
         if sidecar.exists():
-            doc = json.loads(sidecar.read_text(encoding="utf-8"))
-            tip = tip_for(number, doc)
+            try:
+                doc = json.loads(sidecar.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise RotsealError(
+                    f"cannot read sidecar {sidecar}: {exc}"
+                ) from exc
+            tip_by_number[number] = tip_for(number, doc)
             continue
         if not (directory / segment_filename(number)).exists():
             continue
         if not read_records(directory / segment_filename(number)):
             continue
-        doc = seal_segment(
-            archive, number, keyring, key_id=key_id, prev_tip=tip
-        )
+        prev_tip = None if number <= 1 else tip_by_number.get(number - 1)
+        doc = seal_segment(archive, number, keyring, key_id=key_id, prev_tip=prev_tip)
         entries[number].update(
             {
                 "sealed": True,
@@ -204,7 +286,7 @@ def seal(archive, keyring: dict, key_id=None) -> list:
                 "sealed_length": doc["sealed_length"],
             }
         )
-        tip = tip_for(number, doc)
+        tip_by_number[number] = tip_for(number, doc)
         sealed.append(number)
     save_index(archive, index)
     return sealed

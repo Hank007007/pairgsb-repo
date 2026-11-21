@@ -120,6 +120,8 @@ def cmd_prune(args) -> int:
     verb = "would prune" if result["dry_run"] else "pruned"
     for number in result["removed"]:
         print(f"{verb}: segment {number}")
+    for item in result.get("reported", []):
+        print(f"warning: segment {item['segment']}: {item['reason']}")
     if not result["removed"]:
         print(f"nothing to prune (keep {result['window']})")
     return 0

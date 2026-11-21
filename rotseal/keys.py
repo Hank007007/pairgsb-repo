@@ -8,12 +8,14 @@ always be traced back to the key that produced its signature.
 from __future__ import annotations
 
 import base64
+import io
+import json
 import os
 import pickle
 import secrets
 from pathlib import Path
 
-from .util import RotsealError, isoformat_utc
+from .util import RotsealError, isoformat_utc, write_json_atomic
 
 KEYRING_ENV = "ROTSEAL_KEYRING"
 ACTIVE_KEY_ENV = "ROTSEAL_ACTIVE_KEY"
@@ -41,18 +43,37 @@ def empty_keyring() -> dict:
     return {"version": KEYRING_VERSION, "active": None, "keys": []}
 
 
-def load_keyring(path) -> dict:
-    """Load a keyring document from disk."""
+class _RestrictedUnpickler(pickle.Unpickler):
+    """Read legacy keyrings without resolving arbitrary classes/functions."""
 
-    path = Path(path)
-    if not path.exists():
-        return empty_keyring()
+    def find_class(self, module, name):
+        raise pickle.UnpicklingError(
+            f"refusing to resolve {module}.{name} while loading a keyring"
+        )
+
+    def persistent_load(self, pid):
+        raise pickle.UnpicklingError("persistent pickle data is not allowed")
+
+
+def _load_legacy_pickle(raw: bytes):
+    """Load old pickle keyrings through a restricted unpickler.
+
+    Previous versions stored keyrings with :mod:`pickle`.  Legacy files made
+    only of dictionaries, lists and scalar values still load, while the
+    unpickler refuses every attempt to resolve or call application code.
+    """
+
     try:
-        with path.open("rb") as handle:
-            data = pickle.load(handle)
+        return _RestrictedUnpickler(io.BytesIO(raw)).load()
     except Exception as exc:
-        raise RotsealError(f"cannot read keyring {path}: {exc}") from exc
+        raise RotsealError(f"cannot read keyring: {exc}") from exc
+
+
+def _validate_keyring(data, path) -> dict:
     if not isinstance(data, dict):
+        raise RotsealError(f"malformed keyring: {path}")
+    keys = data.get("keys", [])
+    if not isinstance(keys, list) or any(not isinstance(item, dict) for item in keys):
         raise RotsealError(f"malformed keyring: {path}")
     data.setdefault("version", KEYRING_VERSION)
     data.setdefault("keys", [])
@@ -60,13 +81,33 @@ def load_keyring(path) -> dict:
     return data
 
 
+def load_keyring(path) -> dict:
+    """Load a keyring document from disk.
+
+    The keyring is ordinary data.  It must never be unpickled without
+    restrictions: a keyring path is configuration, and pointing it at an
+    attacker-controlled file must not execute code.
+    """
+
+    path = Path(path)
+    if not path.exists():
+        return empty_keyring()
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise RotsealError(f"cannot read keyring {path}: {exc}") from exc
+
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        data = _load_legacy_pickle(raw)
+    return _validate_keyring(data, path)
+
+
 def save_keyring(path, keyring: dict) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    with tmp.open("wb") as handle:
-        pickle.dump(keyring, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    os.replace(tmp, path)
+    write_json_atomic(path, keyring)
     try:
         os.chmod(path, 0o600)
     except OSError:
@@ -111,7 +152,12 @@ def secret_bytes(entry: dict) -> bytes:
     value = entry.get("secret")
     if not value:
         raise RotsealError(f"key {entry.get('id')!r} has no secret material")
-    return base64.b64decode(value)
+    try:
+        return base64.b64decode(value)
+    except Exception as exc:
+        raise RotsealError(
+            f"key {entry.get('id')!r} has malformed secret material"
+        ) from exc
 
 
 def active_key(keyring: dict) -> dict:

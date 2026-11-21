@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,7 +13,9 @@ from pathlib import Path
 SEGMENTS_DIRNAME = "segments"
 INDEX_FILENAME = "index.json"
 ACTIVE_FILENAME = "active.ndjson"
+TOMBSTONES_FILENAME = "tombstones.json"
 INDEX_VERSION = 1
+TOMBSTONES_VERSION = 1
 
 
 class RotsealError(Exception):
@@ -40,6 +43,10 @@ def index_path(archive) -> Path:
     return Path(archive) / INDEX_FILENAME
 
 
+def tombstones_path(archive) -> Path:
+    return Path(archive) / TOMBSTONES_FILENAME
+
+
 def segment_filename(number: int) -> str:
     return f"segment-{int(number):06d}.ndjson"
 
@@ -51,6 +58,14 @@ def seal_filename(number: int) -> str:
 def ensure_archive(archive) -> Path:
     root = Path(archive)
     (root / SEGMENTS_DIRNAME).mkdir(parents=True, exist_ok=True)
+    path = index_path(root)
+    if not path.exists():
+        write_json_atomic(path, empty_index())
+    else:
+        data = read_json(path)
+        if isinstance(data, dict) and not data.get("archive_id"):
+            data["archive_id"] = secrets.token_hex(16)
+            write_json_atomic(path, data)
     return root
 
 
@@ -197,7 +212,11 @@ def set_segments_readonly(archive, readonly: bool = True) -> None:
 
 
 def empty_index() -> dict:
-    return {"version": INDEX_VERSION, "segments": []}
+    return {
+        "version": INDEX_VERSION,
+        "archive_id": secrets.token_hex(16),
+        "segments": [],
+    }
 
 
 def load_index(archive) -> dict:
@@ -215,6 +234,79 @@ def save_index(archive, index: dict) -> None:
     write_json_atomic(index_path(archive), index)
 
 
+def empty_tombstones() -> dict:
+    return {"version": TOMBSTONES_VERSION, "tombstones": []}
+
+
+def _tombstone_number(item) -> int | None:
+    if not isinstance(item, dict):
+        return None
+    try:
+        return int(item["number"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def load_tombstones(archive) -> list:
+    """Load retention tombstones.
+
+    Tombstones are kept in their own durable document, and older archives may
+    also have them embedded in ``index.json``.  Both sources are merged by
+    block number so either representation can explain a retention hole.
+    """
+
+    archive = Path(archive)
+    merged = {}
+
+    path = tombstones_path(archive)
+    if path.exists():
+        data = read_json(path)
+        if not isinstance(data, dict) or not isinstance(
+            data.get("tombstones", []), list
+        ):
+            raise RotsealError(f"malformed tombstone file: {path}")
+        for item in data.get("tombstones", []):
+            number = _tombstone_number(item)
+            if number is None:
+                raise RotsealError(f"malformed tombstone entry in {path}: {item!r}")
+            merged[number] = item
+
+    path = index_path(archive)
+    if path.exists():
+        data = read_json(path)
+        if isinstance(data, dict):
+            embedded = data.get("tombstones", [])
+            if not isinstance(embedded, list):
+                raise RotsealError(f"malformed tombstones in {path}")
+            for item in embedded:
+                number = _tombstone_number(item)
+                if number is None:
+                    raise RotsealError(
+                        f"malformed tombstone entry in {path}: {item!r}"
+                    )
+                merged.setdefault(number, item)
+
+    return [merged[number] for number in sorted(merged)]
+
+
+def save_tombstones(archive, tombstones) -> None:
+    ordered = []
+    seen = set()
+    for item in tombstones:
+        number = _tombstone_number(item)
+        if number is None:
+            raise RotsealError(f"malformed tombstone entry: {item!r}")
+        if number in seen:
+            continue
+        seen.add(number)
+        ordered.append(item)
+    ordered.sort(key=lambda item: int(item["number"]))
+    write_json_atomic(
+        tombstones_path(archive),
+        {"version": TOMBSTONES_VERSION, "tombstones": ordered},
+    )
+
+
 def entries_by_number(index: dict) -> dict:
     result = {}
     for entry in index.get("segments", []):
@@ -226,8 +318,32 @@ def entries_by_number(index: dict) -> dict:
     return result
 
 
-def next_segment_number(index: dict) -> int:
+def next_segment_number(index: dict, directory=None, tombstones=None) -> int:
+    """Return the next never-used block number.
+
+    Retention removes index entries, so the highest surviving number is not
+    enough.  Tombstones and any segment files still on disk are consulted as
+    well, which keeps block numbers monotonic after deletion.
+    """
+
     numbers = [int(entry.get("number", 0)) for entry in index.get("segments", [])]
+    for item in index.get("tombstones", []) or []:
+        try:
+            numbers.append(int(item["number"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    for item in tombstones or []:
+        try:
+            numbers.append(int(item["number"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    if directory is not None:
+        directory = Path(directory)
+        if directory.exists():
+            for child in directory.iterdir():
+                match = re.match(r"^segment-(\d{6})\.(?:ndjson|seal)$", child.name)
+                if match:
+                    numbers.append(int(match.group(1)))
     return max(numbers, default=0) + 1
 
 

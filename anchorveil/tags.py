@@ -7,11 +7,10 @@ returns the value that replaces it.
 
 from __future__ import annotations
 
-import importlib
 import os
 from collections.abc import Callable, Mapping
 
-from .errors import TagError
+from .errors import TagError, UnknownTagError
 from .nodes import Node, ScalarNode, TaggedNode
 from .scalars import parse_scalar
 
@@ -81,7 +80,7 @@ def construct_tagged(node: TaggedNode, registry: TagRegistry) -> Node:
     """Expand a tagged node using ``registry``."""
     handler = registry.get(node.tag)
     if handler is None:
-        handler = _fallback_constructor(node.tag)
+        raise UnknownTagError(node.tag, node.line)
     return _apply_handler(node, handler)
 
 
@@ -115,36 +114,3 @@ def _render(value: object) -> str:
     if value is None:
         return "null"
     return repr(value)
-
-
-def _fallback_constructor(tag: str):
-    """Build a constructor from the tag text itself.
-
-    Handles the ``!module.attr:argument`` shape as well as the ``!py/object``
-    prefix used by object-serialisation templates.
-    """
-    body = tag[1:]
-    kind, _, payload = body.partition(":")
-    if kind in ("py/object", "python/object"):
-        target, _, argument = payload.partition(" ")
-        target = target.strip()
-        argument = argument.strip()
-        if len(argument) >= 2 and argument[0] == argument[-1] and argument[0] in ("'", '"'):
-            argument = argument[1:-1]
-    else:
-        target = kind.strip()
-        argument = payload.strip()
-
-    module_name, _, attr = target.rpartition(".")
-    if not module_name or not attr:
-        return lambda content: content
-
-    module = importlib.import_module(module_name)
-    factory = getattr(module, attr)
-
-    def constructor(content: object) -> object:
-        if argument:
-            return factory(argument)
-        return factory(content)
-
-    return constructor

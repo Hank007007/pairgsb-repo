@@ -71,8 +71,12 @@ def _unescape_double(body: str) -> str:
 
 def parse_scalar(text: str, quoted: bool = False) -> object:
     """Return the Python value for a scalar with the given source text."""
-    raw = unquote(text) if quoted else text
-    if raw == "" or raw in _NULL_WORDS:
+    if quoted:
+        return unquote(text)
+    raw = text
+    if raw == "":
+        return ""
+    if raw in _NULL_WORDS:
         return None
     if raw in _TRUE_WORDS:
         return True

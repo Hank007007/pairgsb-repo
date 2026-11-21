@@ -26,7 +26,7 @@ def apply_merge(node: Node, line: int = 0) -> Node:
     if MERGE_KEY not in resolved:
         return resolved
 
-    operands = resolved[MERGE_KEY]
+    operands = resolved.pop(MERGE_KEY)
     if isinstance(operands, dict):
         sources = [operands]
     elif isinstance(operands, list):
@@ -38,5 +38,6 @@ def apply_merge(node: Node, line: int = 0) -> Node:
         if not isinstance(source, dict):
             raise MergeError("merge key operand must be a mapping or a list of mappings")
         for key, value in source.items():
-            resolved[key] = value
+            if key not in resolved:
+                resolved[key] = value
     return resolved

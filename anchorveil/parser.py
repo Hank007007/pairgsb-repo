@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .errors import ParseError
+from .errors import DuplicateKeyError, ParseError
 from .nodes import AliasNode, Node, ScalarNode, TaggedNode
 
 
@@ -133,6 +133,8 @@ def _parse_mapping(
             raise ParseError("expected 'key: value'", line.lineno)
         key_text, rest = split
         key = _key_text(key_text, line.lineno)
+        if key in mapping:
+            raise DuplicateKeyError(key, line.lineno)
         index += 1
         value, index = _parse_value(
             rest, lines, index, indent, line.lineno, anchors, allow_block=True

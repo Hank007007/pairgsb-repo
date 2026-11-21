@@ -1,0 +1,23 @@
+# Build output
+/bin/
+/dist/
+/otadump
+/otadump.exe
+*.exe
+*.test
+*.out
+*.prof
+
+# Coverage and test caches
+coverage.*
+/.cache/
+/.tmp/
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local task notes
+.build.prompt.txt

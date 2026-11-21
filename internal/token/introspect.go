@@ -4,11 +4,13 @@ package token
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,7 +23,13 @@ type Info struct {
 	Subject string
 	Scope   string
 	CNFJKT  string
+
+	exp *int64
 }
+
+// ErrUnauthenticated is returned when the introspection endpoint answered
+// but the token is not authenticated (inactive, expired, or unbound).
+var ErrUnauthenticated = errors.New("token: not authenticated")
 
 // Client talks to the introspection endpoint.
 type Client struct {
@@ -74,7 +82,16 @@ func (c *Client) Introspect(ctx context.Context, accessToken string) (*Info, err
 	if err != nil {
 		return nil, err
 	}
-	c.store(accessToken, info)
+
+	lifetime := c.TTL
+	if info.exp != nil {
+		if remaining := time.Unix(*info.exp, 0).Sub(c.now()); remaining < lifetime {
+			lifetime = remaining
+		}
+	}
+	if lifetime > 0 {
+		c.store(accessToken, info, lifetime)
+	}
 	return info, nil
 }
 
@@ -114,39 +131,50 @@ func (c *Client) fetch(ctx context.Context, accessToken string) (*Info, error) {
 		return nil, fmt.Errorf("token: introspection response: %w", err)
 	}
 	if !r.Active {
-		log.Printf("token: introspection reported inactive token")
+		return nil, fmt.Errorf("%w: introspection reported inactive", ErrUnauthenticated)
+	}
+	if r.Exp != nil && *r.Exp <= c.now().Unix() {
+		return nil, fmt.Errorf("%w: introspection reported expired", ErrUnauthenticated)
+	}
+	if r.CNF == nil || r.CNF.JKT == "" {
+		return nil, fmt.Errorf("%w: introspection response missing cnf.jkt", ErrUnauthenticated)
 	}
 
-	info := &Info{Subject: r.Sub, Scope: r.Scope}
-	if r.CNF != nil {
-		info.CNFJKT = r.CNF.JKT
-	}
+	info := &Info{Subject: r.Sub, Scope: r.Scope, CNFJKT: r.CNF.JKT, exp: r.Exp}
 	return info, nil
 }
 
+// cacheKey derives the cache key from the access token. The raw token is a
+// bearer secret and is never used as a map key.
 func (c *Client) cacheKey(accessToken string) string {
-	return accessToken
+	sum := sha256.Sum256([]byte(accessToken))
+	return hex.EncodeToString(sum[:])
 }
 
 func (c *Client) fromCache(accessToken string) (*Info, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	entry, ok := c.cache[c.cacheKey(accessToken)]
+	key := c.cacheKey(accessToken)
+	entry, ok := c.cache[key]
 	if !ok {
+		return nil, false
+	}
+	if !entry.expiresAt.After(c.now()) {
+		delete(c.cache, key)
 		return nil, false
 	}
 	info := entry.info
 	return &info, true
 }
 
-func (c *Client) store(accessToken string, info *Info) {
+func (c *Client) store(accessToken string, info *Info, lifetime time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.cache[c.cacheKey(accessToken)] = cacheEntry{
 		info:      *info,
-		expiresAt: c.now().Add(c.TTL),
+		expiresAt: c.now().Add(lifetime),
 	}
 }
 

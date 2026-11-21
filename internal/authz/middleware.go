@@ -5,7 +5,7 @@ package authz
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -102,7 +102,7 @@ func (m *Middleware) authenticate(r *http.Request) (*Principal, error) {
 
 	jkt, err := jwk.Thumbprint(pr.Key)
 	if err != nil {
-		log.Printf("authz: thumbprint unavailable: %v", err)
+		return nil, fmt.Errorf("%w: %v", errKey, err)
 	}
 
 	replayTTL := m.ReplayTTL
@@ -118,9 +118,9 @@ func (m *Middleware) authenticate(r *http.Request) (*Principal, error) {
 
 	info, err := m.Tokens.Introspect(r.Context(), accessToken)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", errToken, err)
 	}
-	if info.CNFJKT != "" && jkt != "" && !jwk.Matches(info.CNFJKT, jkt) {
+	if info.CNFJKT == "" || !jwk.Matches(info.CNFJKT, jkt) {
 		return nil, errBinding
 	}
 
@@ -132,6 +132,8 @@ var (
 	errReplay  = errors.New("authz: proof already used")
 	errBinding = errors.New("authz: token is not bound to the presented key")
 	errCreds   = errors.New("authz: missing or malformed credentials")
+	errKey     = errors.New("authz: proof key cannot be fingerprinted")
+	errToken   = errors.New("authz: token introspection failed")
 )
 
 func bearerToken(r *http.Request) (string, error) {
@@ -143,7 +145,6 @@ func bearerToken(r *http.Request) (string, error) {
 	if !ok || !strings.EqualFold(scheme, "DPoP") {
 		return "", errCreds
 	}
-	rest = strings.TrimSpace(rest)
 	if rest == "" || strings.ContainsAny(rest, " \t") {
 		return "", errCreds
 	}
@@ -166,7 +167,11 @@ func requestURL(r *http.Request) string {
 }
 
 func challenge(w http.ResponseWriter, err error) {
-	w.Header().Set("WWW-Authenticate", `DPoP error="invalid_dpop_proof"`)
+	code := "invalid_dpop_proof"
+	if errors.Is(err, errToken) || errors.Is(err, errBinding) {
+		code = "invalid_token"
+	}
+	w.Header().Set("WWW-Authenticate", `DPoP error="`+code+`"`)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
 	_, _ = w.Write([]byte(`{"error":"invalid_request"}`))

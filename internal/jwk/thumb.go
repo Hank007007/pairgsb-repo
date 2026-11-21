@@ -13,7 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
-	"strings"
+	"strconv"
 )
 
 var (
@@ -129,23 +129,39 @@ func decodeInt(value string) (*big.Int, error) {
 }
 
 // Thumbprint returns the base64url-encoded SHA-256 digest of the key's
-// canonical JSON form, as specified by RFC 7638.
+// canonical JSON form, as specified by RFC 7638. The canonical form contains
+// exactly the required members for the key type, in lexicographic order;
+// members such as kid, alg, use and key_ops are omitted.
 func Thumbprint(k *Key) (string, error) {
 	if k == nil || k.raw == nil {
 		return "", ErrMalformed
 	}
-	if k.Kty() != "EC" {
+	var canonical string
+	switch k.Kty() {
+	case "EC":
+		crv, x, y := k.member("crv"), k.member("x"), k.member("y")
+		if crv == "" || x == "" || y == "" {
+			return "", ErrMalformed
+		}
+		canonical = `{"crv":` + strconv.Quote(crv) +
+			`,"kty":"EC","x":` + strconv.Quote(x) +
+			`,"y":` + strconv.Quote(y) + `}`
+	case "RSA":
+		e, n := k.member("e"), k.member("n")
+		if e == "" || n == "" {
+			return "", ErrMalformed
+		}
+		canonical = `{"e":` + strconv.Quote(e) +
+			`,"kty":"RSA","n":` + strconv.Quote(n) + `}`
+	default:
 		return "", ErrUnsupportedKey
 	}
-	canonical, err := json.Marshal(k.raw)
-	if err != nil {
-		return "", ErrMalformed
-	}
-	sum := sha256.Sum256(canonical)
+	sum := sha256.Sum256([]byte(canonical))
 	return base64.RawURLEncoding.EncodeToString(sum[:]), nil
 }
 
 // Matches reports whether two encoded thumbprints identify the same key.
+// The comparison is exact: base64url is case-sensitive.
 func Matches(a, b string) bool {
-	return strings.EqualFold(a, b)
+	return a == b
 }

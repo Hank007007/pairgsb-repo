@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net"
 	"strings"
 	"time"
 
@@ -27,6 +28,11 @@ var (
 	ErrSignature = errors.New("proof: bad signature")
 	// ErrStale is returned when the proof is outside its validity window.
 	ErrStale = errors.New("proof: outside validity window")
+	// ErrMissingClaim is returned when a required claim is absent.
+	ErrMissingClaim = errors.New("proof: missing required claim")
+	// ErrMismatch is returned when the proof is not bound to the request
+	// it arrived on (htm, htu or ath mismatch).
+	ErrMismatch = errors.New("proof: not bound to this request")
 )
 
 // Request describes the request a proof was presented on.
@@ -62,7 +68,7 @@ type payload struct {
 	HTM string `json:"htm"`
 	HTU string `json:"htu"`
 	ATH string `json:"ath"`
-	IAT int64  `json:"iat"`
+	IAT *int64 `json:"iat"`
 	EXP *int64 `json:"exp"`
 }
 
@@ -118,35 +124,84 @@ func Verify(raw string, req Request) (*Proof, error) {
 	if err := json.Unmarshal(payJSON, &p); err != nil {
 		return nil, ErrMalformed
 	}
+	if p.JTI == "" || p.HTM == "" || p.HTU == "" || p.ATH == "" ||
+		p.IAT == nil || p.EXP == nil {
+		return nil, ErrMissingClaim
+	}
 
 	out := &Proof{
 		JTI:     p.JTI,
 		HTM:     p.HTM,
 		HTU:     p.HTU,
 		ATH:     p.ATH,
-		IAT:     p.IAT,
+		IAT:     *p.IAT,
+		EXP:     *p.EXP,
+		HasExp:  true,
 		Key:     key,
 		Alg:     h.Alg,
 		Request: req,
 	}
-	if p.EXP != nil {
-		out.EXP = *p.EXP
-		out.HasExp = true
+	if err := out.bindRequest(); err != nil {
+		return nil, err
 	}
 	return out, nil
+}
+
+// bindRequest checks the proof's htm, htu and ath claims against the request
+// it was presented on.
+func (p *Proof) bindRequest() error {
+	if p.HTM != p.Request.Method {
+		return ErrMismatch
+	}
+	if normalizeHTU(p.HTU) != normalizeHTU(p.Request.Target) {
+		return ErrMismatch
+	}
+	if p.ATH != AccessTokenHash(p.Request.AccessToken) {
+		return ErrMismatch
+	}
+	return nil
+}
+
+// normalizeHTU applies the normalization of docs/dpop-profile.md §4: scheme
+// and host are lowercased, query and fragment are dropped, and a default
+// port (:443 for https, :80 for http) is removed. The path is left exactly
+// as received.
+func normalizeHTU(raw string) string {
+	if i := strings.Index(raw, "#"); i >= 0 {
+		raw = raw[:i]
+	}
+	if i := strings.Index(raw, "?"); i >= 0 {
+		raw = raw[:i]
+	}
+	scheme, rest, ok := strings.Cut(raw, "://")
+	if !ok {
+		return raw
+	}
+	scheme = strings.ToLower(scheme)
+	host, path, hasPath := strings.Cut(rest, "/")
+	host = strings.ToLower(host)
+	if h, port, err := net.SplitHostPort(host); err == nil {
+		if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+			host = h
+		}
+	}
+	if !hasPath {
+		return scheme + "://" + host
+	}
+	return scheme + "://" + host + "/" + path
 }
 
 // CheckFreshness reports whether the proof's timestamps are acceptable at the
 // given server time.
 func CheckFreshness(p *Proof, now time.Time) error {
 	if !p.HasExp {
-		return nil
+		return ErrStale
 	}
-	reference := now
-	if p.IAT != 0 {
-		reference = time.Unix(p.IAT, 0)
+	if now.Unix() >= p.EXP {
+		return ErrStale
 	}
-	if reference.Unix() >= p.EXP {
+	delta := now.Unix() - p.IAT
+	if delta < -60 || delta > 60 {
 		return ErrStale
 	}
 	return nil
@@ -157,10 +212,6 @@ func CheckFreshness(p *Proof, now time.Time) error {
 func AccessTokenHash(accessToken string) string {
 	sum := sha256.Sum256([]byte(accessToken))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
-}
-
-func htuMatches(expected, actual string) bool {
-	return strings.HasPrefix(actual, expected)
 }
 
 func checkSignature(alg string, pub crypto.PublicKey, signed, sig []byte) error {

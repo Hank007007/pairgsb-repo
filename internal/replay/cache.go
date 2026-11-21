@@ -8,7 +8,7 @@ import (
 )
 
 // Cache is a bounded in-memory set of accepted proofs. A record keeps the
-// second in which the proof was accepted.
+// time at which the proof's retention window ends.
 type Cache struct {
 	mu      sync.Mutex
 	entries map[string]time.Time
@@ -25,20 +25,22 @@ func NewCache(ttl time.Duration) *Cache {
 
 // MarkSeen records that a proof was accepted and reports whether it had
 // already been seen. ttl is the retention the caller asks for this record.
+// The check-and-record is atomic, so concurrent arrivals of the same proof
+// cannot both be accepted. Uniqueness is scoped to (jkt, jti).
 func (c *Cache) MarkSeen(jkt, jti string, now time.Time, ttl time.Duration) bool {
-	id := jti
-
-	if _, ok := c.Get(id, now); ok {
-		return true
-	}
-
 	if ttl <= 0 {
 		ttl = c.ttl
 	}
+	id := jkt + "\x00" + jti
 
 	c.mu.Lock()
-	c.entries[id] = now.Truncate(time.Second)
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+
+	c.prune(now)
+	if _, ok := c.entries[id]; ok {
+		return true
+	}
+	c.entries[id] = now.Add(ttl)
 	return false
 }
 
@@ -48,15 +50,21 @@ func (c *Cache) Get(id string, now time.Time) (time.Time, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.Prune(now)
+	c.prune(now)
 	stamp, ok := c.entries[id]
 	return stamp, ok
 }
 
-// Prune drops records whose stamp is at or before the current second.
+// Prune drops records whose retention window has ended.
 func (c *Cache) Prune(now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.prune(now)
+}
+
+func (c *Cache) prune(now time.Time) {
 	for id, stamp := range c.entries {
-		if stamp.Unix() <= now.Unix() {
+		if !stamp.After(now) {
 			delete(c.entries, id)
 		}
 	}

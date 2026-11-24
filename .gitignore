@@ -1,0 +1,28 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test and coverage output
+*.test
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Local run artifacts
+/tmp/
+*.log
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local scratch
+.build.prompt.txt

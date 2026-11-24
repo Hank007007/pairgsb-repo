@@ -1,0 +1,18 @@
+rules:
+  - id: sensors-subscribe
+    effect: allow
+    principal: sensor
+    action: sub
+    filter: sensors/+/temp
+
+  - id: sensors-publish
+    effect: allow
+    principal: sensor
+    action: pub
+    filter: sensors/+/temp
+
+  - id: ops-read-all
+    effect: allow
+    principal: operator
+    action: sub
+    filter: "#"

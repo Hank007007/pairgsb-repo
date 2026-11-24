@@ -1,0 +1,21 @@
+{
+  "shared": {
+    "DB_USER": {
+      "value": "EgsUBhYEHg=="
+    },
+    "DB_PASSWORD": {
+      "value": "FS4FAEUWXF8Q"
+    }
+  },
+  "app": {
+    "DB_PASSWORD": {
+      "value": "BB4GXhUAH14DCgEQ"
+    },
+    "API_TOKEN": {
+      "value": "EQEdLAkIGkgrBBEXSQ4DSB8DBQcF"
+    },
+    "RELEASE_NOTES": {
+      "value": "AwcOSUUFA0NTEVMWXw4EEidDVFFcWlEWW1FXAA=="
+    }
+  }
+}

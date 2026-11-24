@@ -1,0 +1,12 @@
+{
+  "scopes": [
+    { "name": "shared", "priority": 10 },
+    { "name": "app", "priority": 20 }
+  ],
+  "rules": [
+    { "effect": "allow", "pipeline": "web", "branch": "main", "scope": "shared" },
+    { "effect": "allow", "pipeline": "web", "branch": "release/*", "scope": "app" },
+    { "effect": "allow", "pipeline": "web", "branch": "main", "scope": "app" },
+    { "effect": "allow", "pipeline": "api", "branch": "main", "scope": "shared" }
+  ]
+}

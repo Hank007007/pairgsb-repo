@@ -1,0 +1,5 @@
+{
+  "pipeline": "api",
+  "scopes": ["shared"],
+  "max_duration_ms": 1800000
+}

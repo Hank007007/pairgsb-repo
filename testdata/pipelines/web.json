@@ -1,0 +1,5 @@
+{
+  "pipeline": "web",
+  "scopes": ["app", "shared"],
+  "max_duration_ms": 600000
+}

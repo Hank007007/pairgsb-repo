@@ -1,0 +1,2 @@
+default-src 'self'; img-src https://ok.example
+https://evil.examplescript-src 'self'

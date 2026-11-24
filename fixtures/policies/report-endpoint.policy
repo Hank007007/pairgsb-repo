@@ -1,0 +1,1 @@
+default-src 'self'; report-to https://reports.platform.example/csp/collect

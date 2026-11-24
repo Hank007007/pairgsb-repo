@@ -1,0 +1,17 @@
+{
+  "name": "cspfence",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Compile tenant CSP policies into edge response headers.",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "cspfence": "bin/csp.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "compile": "node bin/csp.js"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "apiVersion": "admission.k8s.io/v1",
+  "kind": "AdmissionReview",
+  "request": {
+    "uid": "6d0f2a44-3c2e-4c55-9b0e-77a51f0b2f31",
+    "kind": {"group": "", "version": "v1", "kind": "Pod"},
+    "namespace": "build-farm",
+    "operation": "UPDATE",
+    "object": {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "metadata": {
+        "name": "web-7d9c",
+        "namespace": "build-farm",
+        "labels": {"app": "web", "revision": "2"}
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "web",
+            "image": "registry.internal/team/web:1.4.3"
+          }
+        ]
+      }
+    },
+    "oldObject": {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "metadata": {
+        "name": "web-7d9c",
+        "namespace": "build-farm",
+        "labels": {"app": "web", "revision": "1"}
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "web",
+            "image": "registry.internal/team/web:1.4.2"
+          }
+        ]
+      }
+    }
+  },
+  "namespaceObject": {
+    "metadata": {
+      "name": "build-farm",
+      "labels": {"tier": "build"}
+    }
+  }
+}

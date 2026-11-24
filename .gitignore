@@ -1,0 +1,23 @@
+# build output
+/bin/
+/dist/
+/podgrated
+/podgrated.exe
+*.exe
+*.test
+*.out
+
+# coverage and profiling
+*.prof
+coverage.txt
+coverage.html
+
+# editor / OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# local scratch
+.build.prompt.txt

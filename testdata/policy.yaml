@@ -1,0 +1,58 @@
+version: 3
+
+allowedHostPaths:
+  - /var/run
+  - /var/log/pods
+
+allowedRegistries:
+  - registry.internal
+
+allowedCapabilities:
+  - CHOWN
+  - NET_BIND_SERVICE
+  - DAC_OVERRIDE
+
+defaults:
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    seccompProfile:
+      type: RuntimeDefault
+    capabilities:
+      drop:
+        - ALL
+
+namespaces:
+  - name: build-farm
+    labels:
+      tier: build
+    enabled: true
+    overrides:
+      allowedRegistries:
+        - registry.internal
+        - registry.build.internal
+
+  - name: partner-acme
+    labels:
+      tier: partner
+    enabled: true
+    overrides:
+      allowedHostPaths:
+        - /var/run
+
+  - name: sandbox
+    labels:
+      tier: sandbox
+    enabled: false
+    overrides:
+      allowedHostPaths:
+        - /var/run
+        - /tmp
+
+default:
+  overrides:
+    allowedHostPaths:
+      - /var/run

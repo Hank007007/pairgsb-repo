@@ -1,0 +1,1 @@
+<13>1 2026-02-11T08:16:30Z acme.example.com web - REQ [http@32473 path="/search?q=\]" note="quote \" and bracket \]"] GET /search?q=]

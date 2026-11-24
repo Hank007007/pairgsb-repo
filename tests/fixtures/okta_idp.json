@@ -1,0 +1,22 @@
+{
+  "provider": "okta-dev",
+  "issuer": "https://idp.example.com/oauth2/default",
+  "client_id": "noncebind-console",
+  "access_token": "fixture-access-token-6b1d0c",
+  "nonce": "fixture-nonce-7f3c9a2d",
+  "now": 1795478400,
+  "max_age": 300,
+  "id_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Im9rdGEtMjAyNi0wMSJ9.eyJpc3MiOiJodHRwczovL2lkcC5leGFtcGxlLmNvbS9vYXV0aDIvZGVmYXVsdCIsImF1ZCI6Im5vbmNlYmluZC1jb25zb2xlIiwiYXpwIjoibm9uY2ViaW5kLWNvbnNvbGUiLCJzdWIiOiJ1c2VyLTEyMzQiLCJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJub25jZSI6ImZpeHR1cmUtbm9uY2UtN2YzYzlhMmQiLCJpYXQiOjE3OTU0Nzg0MDAsImF1dGhfdGltZSI6MTc5NTQ3ODM3MCwiZXhwIjo0MTAyNDQ0ODAwLCJhdF9oYXNoIjoiRjdMS3dBamtQdmIyeWQ4YjB3YzhtZyJ9.stnBAG9HAS5DmWtsuNztyN18F1cA7K4AtsSHZ2Dw_3QR2ekhbgdZFukqtP8OTU3mjnsOtkEq-U82OIl5q0x0ywc-ot8zmu7Q2b74PCflCj7jCS5xeXHur6LqUQ8bnZiJlQKkHJu4hJsoj5ZbzrtIMcYpJQY16dWqmRBo_sNv2GwkzqBfQz571X8BUPP6KSGHtLSNzV1MmD3sH23JzPyhSARTCcJzXi1PNT7P3Au8gEGqcA9m-9u_JkRXbh6rR97Y3mKUgjPsCW4bVF3ZdRS0i8TsmM95NUFbqufvWcjEz_yawHGzXFZ9NWOhV7feIch8lShPbnY-rvWvEZKEy6zuow",
+  "jwks": {
+    "keys": [
+      {
+        "kty": "RSA",
+        "kid": "okta-2026-01",
+        "use": "sig",
+        "alg": "RS256",
+        "n": "tVzf9sc2HQjOKx5YJ7yF8RsADMf4-HB42JPRBlThIyxrBCwl1i1UiISk4NH0cZqjhsVQPsebr_kql8JJMEyr04oSKhguwwViSf7T7e0BFz3fNkG4T61fU5NokE-CMVaN0ktUnq9qWV4Vnv3p5UFBHLAcpmwwSoclnLetSHu_xe_IOT4APM5fVHk27BGdrojEsULwNdBk1TR_4MBq-sXCrzVtz13Sfrp3noF8bLLQWBvkRIMnxTXEKM2yULhQQuxeaZfKRdxFdNFDjxnjA7G-BMbAHukSGmuOhgoo-MoXYBsv1J5Q5oOX0Cf1yjcBTABZnl_EocjjAbRRh4uJyW1Duw",
+        "e": "AQAB"
+      }
+    ]
+  }
+}

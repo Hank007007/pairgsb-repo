@@ -1,9 +1,7 @@
 """HTTP request handling for ``/oauth/token``."""
 
-import traceback
-
 from .. import policy
-from ..errors import InvalidRequest
+from ..errors import ExchangeError, InvalidRequest
 from ..exchange.service import exchange, refresh
 
 
@@ -25,10 +23,14 @@ def handle_exchange(params, *, store=None):
             result = refresh(params, store=store)
         else:
             raise InvalidRequest("unsupported grant_type")
-    except Exception as exc:
-        return 400, {
-            "error": "invalid_request",
-            "error_description": repr(exc),
-            "traceback": traceback.format_exc(),
+    except ExchangeError as exc:
+        return exc.status, {
+            "error": exc.error,
+            "error_description": exc.description or exc.error,
+        }
+    except Exception:
+        return 500, {
+            "error": "server_error",
+            "error_description": "an internal error occurred",
         }
     return 200, _token_response(result)

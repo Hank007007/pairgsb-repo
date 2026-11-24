@@ -12,12 +12,11 @@ class GrantStore:
     def __init__(self):
         self._grants = {}
 
-    def create(self, *, subject, client_id, audience, scopes, ttl,
-               downscoped_scope=None):
+    def create(self, *, subject, client_id, audience, scopes, ttl):
         """Register a new refresh grant and return its handle.
 
-        *scopes* is the scope the subject holds; *downscoped_scope* is the
-        narrower scope carried by the access token that was just issued.
+        The recorded scope is the scope of the access token just issued and
+        acts as the ceiling for every later redemption.
         """
         handle = secrets.token_urlsafe(24)
         now = int(time.time())
@@ -26,9 +25,6 @@ class GrantStore:
             "client_id": client_id,
             "audience": audience,
             "scope": list(scopes),
-            "downscoped_scope": list(
-                scopes if downscoped_scope is None else downscoped_scope
-            ),
             "issued_at": now,
             "expires_at": now + int(ttl),
             "used": False,
@@ -36,19 +32,24 @@ class GrantStore:
         return handle
 
     def rotate(self, handle, *, scopes):
-        """Issue a replacement refresh grant for *handle* and return the new one."""
+        """Retire *handle* and return a replacement grant.
+
+        The presented handle is invalidated immediately. The replacement
+        records *scopes* (the scope of the token issued by the redemption)
+        and keeps the original expiry, so rotation never extends the family.
+        """
         record = self.lookup(handle)
         new_handle = secrets.token_urlsafe(24)
         self._grants[new_handle] = {
             "subject": record["subject"],
             "client_id": record["client_id"],
             "audience": record["audience"],
-            "scope": list(record["scope"]),
-            "downscoped_scope": list(scopes),
+            "scope": list(scopes),
             "issued_at": int(time.time()),
             "expires_at": record["expires_at"],
             "used": False,
         }
+        record["used"] = True
         return new_handle
 
     def lookup(self, handle):

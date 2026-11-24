@@ -1,7 +1,7 @@
 """Request routing for keywaytransit.
 
-The transport is deliberately thin: a request arrives as a method, a path, a
-header map and a JSON body; a response leaves as a status code and a JSON
+The transport is deliberately thin: a request arrives as a method, a path,
+a header map and a JSON body; a response leaves as a status code and a JSON
 body.  ``dispatch`` is the single entry point both the server and the tests
 use.
 """
@@ -10,14 +10,16 @@ from __future__ import annotations
 
 import base64
 import binascii
-import traceback
+import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 from .. import keystore as keystore_mod
 from ..errors import InvalidBlob, InvalidRequest, KeywayError
+from ..format import MAX_KEY_NAME_LEN
 
 TENANT_HEADER = "x-tenant-id"
+MAX_BATCH_ITEMS = 64
 
 
 @dataclass
@@ -31,7 +33,9 @@ class Request:
     def tenant_id(self) -> str:
         for name, value in self.headers.items():
             if name.lower() == TENANT_HEADER:
-                return value
+                if isinstance(value, str) and value:
+                    return value
+                return ""
         return ""
 
 
@@ -55,18 +59,51 @@ def _b64d(text: str) -> bytes:
 def _context_from(body: dict[str, Any]):
     if "context" not in body:
         return None
-    return body["context"]
+    context = body["context"]
+    if not isinstance(context, Mapping):
+        raise InvalidRequest("context must be an object")
+    for key, value in context.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise InvalidRequest("context keys and values must be strings")
+    return dict(context)
 
 
 def _require_key_name(body: dict[str, Any]) -> str:
     name = body.get("key_name")
     if not isinstance(name, str) or not name:
         raise InvalidRequest("key_name required")
+    if len(name.encode("utf-8")) > MAX_KEY_NAME_LEN:
+        raise InvalidRequest("key_name too long", key_name=name)
     return name
 
 
+def _decode_blob_field(value: Any) -> bytes:
+    if not isinstance(value, str) or not value:
+        raise InvalidRequest("blob required")
+    return _b64d(value)
+
+
+def _audit_entry(request: Request, tenant_id: str, response: Response) -> dict:
+    # §4.5: audit records identify who did what but never carry plaintext
+    # or a wholesale copy of the request body.
+    body = request.body if isinstance(request.body, dict) else {}
+    entry = {
+        "ts": time.time(),
+        "tenant": tenant_id,
+        "operation": request.path,
+        "result": response.body.get("error", "ok"),
+    }
+    key_name = body.get("key_name")
+    if isinstance(key_name, str):
+        entry["key_name"] = key_name
+    version = response.body.get("version")
+    if isinstance(version, int):
+        entry["version"] = version
+    return entry
+
+
 class Router:
-    def __init__(self, store: keystore_mod.KeyStore, audit=None):
+    def __init__(self, store, audit=None):
         self.store = store
         self.audit = audit
 
@@ -81,16 +118,10 @@ class Router:
                 status=exc.status,
                 body=self._error_body(exc),
             )
+        except Exception:  # noqa: BLE001 - never leak internals to callers
+            response = Response(500, {"error": "internal_error"})
         if self.audit is not None:
-            self.audit.record(
-                {
-                    "tenant": tenant_id,
-                    "method": request.method,
-                    "path": request.path,
-                    "body": request.body,
-                },
-                response.body,
-            )
+            self.audit.record(_audit_entry(request, tenant_id, response))
         return response
 
     def _error_body(self, exc: KeywayError) -> dict[str, Any]:
@@ -124,7 +155,7 @@ class Router:
         key_name = _require_key_name(body)
         plaintext = body.get("plaintext", "")
         if not isinstance(plaintext, str):
-            return Response(400, {"error": "invalid_request"})
+            raise InvalidRequest("plaintext must be a string")
         blob = self.store.encrypt(
             tenant_id, key_name, plaintext.encode("utf-8"), _context_from(body)
         )
@@ -132,28 +163,18 @@ class Router:
 
     def _decrypt(self, request: Request, tenant_id: str) -> Response:
         body = request.body
-        try:
-            blob = _b64d(body.get("blob", ""))
-            plaintext = self.store.decrypt(tenant_id, blob, _context_from(body))
-        except Exception as exc:  # noqa: BLE001 - reported to the caller below
-            return Response(
-                500,
-                {
-                    "error": "internal_error",
-                    "detail": str(exc),
-                    "trace": traceback.format_exc(),
-                },
-            )
+        blob = _decode_blob_field(body.get("blob"))
+        plaintext = self.store.decrypt(tenant_id, blob, _context_from(body))
         return Response(200, {"plaintext": plaintext.decode("utf-8", "replace")})
 
     def _batch(self, request: Request, tenant_id: str) -> Response:
         from .batch import handle_batch
 
-        return Response(200, handle_batch(self.store, tenant_id, request.body))
+        return handle_batch(self.store, tenant_id, request)
 
     def _rewrap(self, request: Request, tenant_id: str) -> Response:
         body = request.body
-        blob = _b64d(body.get("blob", ""))
+        blob = _decode_blob_field(body.get("blob"))
         out = self.store.rewrap(tenant_id, blob, _context_from(body))
         return Response(200, {"blob": _b64e(out)})
 
@@ -165,7 +186,9 @@ class Router:
     def _destroy(self, request: Request, tenant_id: str) -> Response:
         body = request.body
         key_name = _require_key_name(body)
-        version = int(body.get("version", 0))
+        version = body.get("version")
+        if not isinstance(version, int) or version <= 0:
+            raise InvalidRequest("version must be a positive integer")
         self.store.destroy_version(tenant_id, key_name, version)
         return Response(200, {"key_name": key_name, "version": version})
 

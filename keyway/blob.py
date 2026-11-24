@@ -13,6 +13,7 @@ from .errors import InvalidBlob
 from .format import (
     FORMAT_VERSION,
     MAGIC,
+    MAX_KEY_VERSION,
     MAX_KEY_NAME_LEN,
     NONCE_LEN,
     PREFIX_LEN,
@@ -32,6 +33,30 @@ class DecodedBlob:
     header: bytes
 
 
+def build_header(key_name: str, version: int) -> bytes:
+    """Serialise the blob header (everything before the nonce).
+
+    The header is also the exact byte string used as GCM AAD, so it must be
+    reconstructed by the decoder from the bytes read off the wire rather
+    than recomputed from trusted inputs (see §1.3).
+    """
+    name_bytes = key_name.encode("utf-8")
+    if len(name_bytes) > MAX_KEY_NAME_LEN:
+        raise InvalidBlob(
+            "key name exceeds the header capacity", key_name=key_name
+        )
+    if not 0 <= version <= MAX_KEY_VERSION:
+        raise InvalidBlob("key version does not fit the header", key_name=key_name)
+
+    return (
+        MAGIC
+        + bytes([FORMAT_VERSION])
+        + version.to_bytes(2, "big")
+        + bytes([len(name_bytes)])
+        + name_bytes
+    )
+
+
 def encode(key_name: str, version: int, nonce: bytes, ciphertext: bytes) -> bytes:
     """Serialise a blob.
 
@@ -41,18 +66,7 @@ def encode(key_name: str, version: int, nonce: bytes, ciphertext: bytes) -> byte
     if len(nonce) != NONCE_LEN:
         raise ValueError("nonce must be 12 bytes")
 
-    name_bytes = key_name.encode("utf-8")
-    if len(name_bytes) > MAX_KEY_NAME_LEN:
-        name_bytes = name_bytes[:MAX_KEY_NAME_LEN]
-    name_len = len(name_bytes)
-
-    header = (
-        MAGIC
-        + bytes([FORMAT_VERSION])
-        + bytes([version & 0xFF])
-        + bytes([name_len])
-        + name_bytes
-    )
+    header = build_header(key_name, version)
     return header + nonce + ciphertext
 
 
@@ -64,19 +78,27 @@ def decode(blob: bytes) -> DecodedBlob:
     if len(blob) < PREFIX_LEN + NONCE_LEN + TAG_LEN:
         raise InvalidBlob("blob too short")
 
-    if blob[:8] != MAGIC:
+    # §1.2: magic is validated before the format version, and unknown
+    # format versions are rejected rather than decoded with an old layout.
+    if blob[0:8] != MAGIC:
         raise InvalidBlob("bad magic")
 
     format_version = blob[8]
-    version = blob[9]
-    name_len = blob[10]
+    if format_version != FORMAT_VERSION:
+        raise InvalidBlob("unknown blob format version")
+
+    version = int.from_bytes(blob[9:11], "big")
+    name_len = blob[11]
 
     name_start = PREFIX_LEN
     name_end = name_start + name_len
-    if name_end + NONCE_LEN + TAG_LEN > len(blob):
+    if name_end > len(blob) - NONCE_LEN - TAG_LEN:
         raise InvalidBlob("truncated blob")
 
-    key_name = blob[name_start:name_end].decode("utf-8", "replace")
+    try:
+        key_name = blob[name_start:name_end].decode("utf-8")
+    except UnicodeDecodeError:
+        raise InvalidBlob("key name is not valid utf-8")
     nonce = blob[name_end:name_end + NONCE_LEN]
     ciphertext = blob[name_end + NONCE_LEN:]
     header = blob[:name_end]

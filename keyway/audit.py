@@ -18,13 +18,12 @@ class AuditLog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
 
-    def record(self, request: dict, response: dict) -> None:
-        """Append an audit entry for one completed request."""
-        entry = {
-            "ts": time.time(),
-            "request": request,
-            "response": response,
-        }
+    def record(self, entry: dict) -> None:
+        """Append an already-sanitised audit entry for one request.
+
+        The routing layer is responsible for omitting plaintext and request
+        bodies (see ``docs/api.md`` §4.5).
+        """
         line = json.dumps(entry, ensure_ascii=False, default=str)
         with self._lock:
             with self.path.open("a", encoding="utf-8") as fh:
@@ -32,5 +31,5 @@ class AuditLog:
 
 
 class NullAudit:
-    def record(self, request: dict, response: dict) -> None:
+    def record(self, entry: dict) -> None:
         return None

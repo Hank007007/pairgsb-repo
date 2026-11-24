@@ -6,7 +6,7 @@ with; callers hand it back on the way in.
 
 from __future__ import annotations
 
-import hashlib
+import os
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -14,26 +14,22 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .format import NONCE_LEN
 
 
-def _derive_nonce(key_name: str, version: int) -> bytes:
-    seed = key_name.encode("utf-8") + version.to_bytes(2, "big")
-    return hashlib.sha256(seed).digest()[:NONCE_LEN]
-
-
 def seal(
     key: bytes,
-    key_name: str,
-    version: int,
+    nonce: bytes,
     plaintext: bytes,
-    context_hash: bytes,
+    aad: bytes,
 ) -> tuple[bytes, bytes]:
     """Encrypt ``plaintext`` and return ``(nonce, ciphertext)``.
 
-    ``context_hash`` identifies the caller's context binding and is supplied
-    as the GCM additional authenticated data for this operation.
+    The nonce is generated on the spot with ``os.urandom`` (see
+    ``docs/blob-format.md`` §1.5).  ``aad`` is the authenticated header:
+    GCM guarantees that any change to those bytes makes opening fail.
     """
-    nonce = _derive_nonce(key_name, version)
+    if len(nonce) != NONCE_LEN:
+        raise ValueError("nonce must be 12 bytes")
     aesgcm = AESGCM(key)
-    ciphertext = aesgcm.encrypt(nonce, plaintext, context_hash)
+    ciphertext = aesgcm.encrypt(nonce, plaintext, aad)
     return nonce, ciphertext
 
 

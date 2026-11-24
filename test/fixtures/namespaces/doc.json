@@ -1,0 +1,9 @@
+{
+  "name": "doc",
+  "version": 1,
+  "relations": {
+    "owner": { "this": {} },
+    "editor": { "this": {} },
+    "reader": { "this": {} }
+  }
+}

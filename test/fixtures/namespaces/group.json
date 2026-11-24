@@ -1,0 +1,8 @@
+{
+  "name": "group",
+  "version": 1,
+  "relations": {
+    "member": { "this": {} },
+    "admin": { "this": {} }
+  }
+}

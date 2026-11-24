@@ -1,0 +1,27 @@
+# Dependencies are vendored nowhere; this project is standard-library only.
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Caches and local state
+.cache/
+tmp/
+.nyc_output/
+coverage/
+*.log
+npm-debug.log*
+.env
+.env.*
+
+# Editors and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Task harness scratch files
+.build.prompt.txt

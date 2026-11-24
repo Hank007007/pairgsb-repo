@@ -1,0 +1,19 @@
+{
+  "name": "folder",
+  "version": 1,
+  "relations": {
+    "parent": { "this": {} },
+    "owner": { "this": {} },
+    "viewer": {
+      "union": [
+        { "this": {} },
+        {
+          "tupleToUserset": {
+            "tupleset": { "relation": "parent" },
+            "computedUserset": { "relation": "viewer" }
+          }
+        }
+      ]
+    }
+  }
+}

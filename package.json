@@ -1,0 +1,15 @@
+{
+  "name": "tupleresolve",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Relation-based authorization (ReBAC) evaluation shared by the internal code host and the document system.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "node bin/serve.js"
+  },
+  "license": "UNLICENSED"
+}

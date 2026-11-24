@@ -55,17 +55,27 @@ class SessionStore:
         *,
         now: float | None = None,
     ) -> Session:
-        """Attach an authenticated identity to ``session_id``."""
+        """Replace the anonymous ``session_id`` with an authenticated session.
+
+        The anonymous record is discarded and a brand-new record with a new
+        identifier is created, so the pre-login id can never be used to reach
+        authenticated state.
+        """
 
         session = self._sessions.get(session_id)
         if session is None:
             raise UnknownSessionError(session_id)
         promoted_at = self.clock() if now is None else float(now)
-        session.authenticated = True
-        session.subject = claims.get("sub")
-        session.claims = dict(claims)
-        session.created_at = promoted_at
-        return session
+        self._sessions.pop(session_id, None)
+        authenticated = Session(
+            id="auth_" + secrets.token_urlsafe(24),
+            authenticated=True,
+            created_at=promoted_at,
+            subject=claims.get("sub"),
+            claims=dict(claims),
+        )
+        self._sessions[authenticated.id] = authenticated
+        return authenticated
 
     def get(self, session_id: str | None) -> Session | None:
         """Return the live session for ``session_id``, if any."""

@@ -74,13 +74,16 @@ class TransactionStore:
         return transaction
 
     def consume(self, state: str, *, now: float | None = None) -> LoginTransaction:
-        """Return the transaction identified by ``state``.
+        """Consume and return the transaction identified by ``state``.
 
-        Raises:
-            UnknownTransactionError: if no transaction exists for ``state``.
+        A transaction is single-use: it is removed from the store on the first
+        successful lookup so that no later callback can present it again.
+
+        :Raises UnknownTransactionError: if no live transaction exists for
+            ``state``, including a transaction that was already consumed.
         """
 
-        transaction = self._transactions.get(state)
+        transaction = self._transactions.pop(state, None)
         if transaction is None:
             raise UnknownTransactionError(state)
         return transaction

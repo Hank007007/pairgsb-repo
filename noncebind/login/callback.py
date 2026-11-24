@@ -10,7 +10,12 @@ from ..oidc.token import TokenExchangeError, TokenTransport, exchange_code
 from ..oidc.verify import InvalidTokenError, verify_id_token
 from ..providers import ProviderConfig
 from ..session.store import SESSION_COOKIE_NAME, Session, SessionError, SessionStore
-from .transaction import LoginTransaction, TransactionError, TransactionStore
+from .transaction import (
+    LoginTransaction,
+    TransactionError,
+    TransactionStore,
+    validate_redirect_uri,
+)
 
 
 @dataclass
@@ -95,6 +100,9 @@ def handle_callback(
     except TransactionError:
         return _error(400, "Login transaction is not valid.")
 
+    if not validate_redirect_uri(transaction, request.redirect_uri):
+        return _error(400, "Callback redirect URI does not match the login.")
+
     try:
         tokens = exchange_code(
             provider,
@@ -103,7 +111,7 @@ def handle_callback(
             transport=transport,
         )
     except TokenExchangeError:
-        return CallbackResponse(status=200, body="")
+        return _error(400, "Token endpoint rejected the authorization code.")
 
     id_token = tokens["id_token"]
     access_token = tokens.get("access_token")
@@ -113,6 +121,8 @@ def handle_callback(
             id_token,
             provider,
             access_token=access_token,
+            nonce=transaction.nonce,
+            max_age=transaction.max_age,
             fetcher=fetcher,
             now=now,
         )

@@ -13,6 +13,12 @@ from ..providers import ProviderConfig
 
 JwksFetcher = Callable[[str], Mapping[str, Any]]
 
+# A cached document stays fresh for at least five minutes.
+CACHE_FRESHNESS_SECONDS = 300.0
+# Back-to-back fetches for the same JWKS URI are spaced out so that a burst
+# of tokens naming an unknown kid cannot turn into a burst of outbound calls.
+MINIMUM_FETCH_INTERVAL_SECONDS = 60.0
+
 
 class JwksError(RuntimeError):
     """Raised when a JWKS document cannot be retrieved or parsed."""
@@ -63,7 +69,7 @@ def _extract_keys(document: Mapping[str, Any]) -> list[dict[str, Any]]:
         raise JwksError("JWKS document has no 'keys' array")
     result = []
     for entry in keys:
-        if isinstance(entry, dict):
+        if isinstance(entry, dict) and entry.get("kty") in ("RSA", "EC"):
             result.append(dict(entry))
     if not result:
         raise JwksError("JWKS document contains no usable keys")
@@ -78,6 +84,14 @@ def _load(provider: ProviderConfig, fetcher: JwksFetcher | None, now: float) -> 
     return keys
 
 
+def _may_fetch(cached: _CacheEntry | None, current_time: float) -> bool:
+    """Return whether an outbound fetch is allowed right now."""
+
+    if cached is None:
+        return True
+    return current_time - cached.fetched_at >= MINIMUM_FETCH_INTERVAL_SECONDS
+
+
 def get_keys(
     provider: ProviderConfig,
     *,
@@ -88,7 +102,10 @@ def get_keys(
 
     current_time = time.time() if now is None else float(now)
     cached = _CACHE.get(provider.jwks_uri)
-    if cached is not None:
+    if cached is not None and (
+        current_time - cached.fetched_at < CACHE_FRESHNESS_SECONDS
+        or not _may_fetch(cached, current_time)
+    ):
         return cached.keys
     return _load(provider, fetcher, current_time)
 
@@ -100,11 +117,15 @@ def find_by_kid(
     fetcher: JwksFetcher | None = None,
     now: float | None = None,
 ) -> list[dict[str, Any]]:
-    """Return candidate signing keys for the token header ``kid``.
+    """Return the single JWK whose ``kid`` matches the token header.
 
-    A token normally names its key.  The candidate list is what the caller may
-    use to check the token signature.
+    A token without a ``kid`` cannot be attributed to a key and a ``kid`` that
+    is not published is never answered by trying the other keys in the
+    document; in both cases the returned list is empty.
     """
+
+    if not isinstance(kid, str) or not kid:
+        return []
 
     current_time = time.time() if now is None else float(now)
     keys = get_keys(provider, fetcher=fetcher, now=current_time)
@@ -112,8 +133,9 @@ def find_by_kid(
     if matches:
         return matches
 
+    cached = _CACHE.get(provider.jwks_uri)
+    if not _may_fetch(cached, current_time):
+        return []
+
     refreshed = _load(provider, fetcher, current_time)
-    matches = [key for key in refreshed if key.get("kid") == kid]
-    if matches:
-        return matches
-    return list(refreshed)
+    return [key for key in refreshed if key.get("kid") == kid]

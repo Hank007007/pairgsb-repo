@@ -4,7 +4,7 @@ package acl
 
 import (
 	"fmt"
-	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -43,6 +43,7 @@ type rawRule struct {
 	Principal string `yaml:"principal"`
 	Action    string `yaml:"action"`
 	Filter    string `yaml:"filter"`
+	Tenant    string `yaml:"tenant"`
 }
 
 // LoadRules parses a policy document. The returned RuleSet has version zero;
@@ -65,27 +66,45 @@ func LoadRules(data []byte) (*RuleSet, error) {
 			return nil, fmt.Errorf("acl: duplicate rule id %q", raw.ID)
 		}
 		seen[raw.ID] = struct{}{}
+
+		effect, err := parseEffect(raw.Effect)
+		if err != nil {
+			return nil, fmt.Errorf("acl: rule %d (%q): %w", i, raw.ID, err)
+		}
+
 		rs.Rules = append(rs.Rules, Rule{
 			ID:        raw.ID,
-			Effect:    parseEffect(raw.Effect),
+			Effect:    effect,
 			Principal: raw.Principal,
 			Action:    raw.Action,
 			Filter:    raw.Filter,
+			Tenant:    raw.Tenant,
 		})
 	}
 	return rs, nil
 }
 
-// parseEffect maps the textual effect of a rule onto an Effect.
-func parseEffect(raw string) Effect {
-	if strings.EqualFold(strings.TrimSpace(raw), string(EffectDeny)) {
-		return EffectDeny
+// parseEffect maps the textual effect of a rule onto an Effect. Only the two
+// documented spellings are accepted.
+func parseEffect(raw string) (Effect, error) {
+	switch Effect(raw) {
+	case EffectAllow:
+		return EffectAllow, nil
+	case EffectDeny:
+		return EffectDeny, nil
+	default:
+		return "", fmt.Errorf("invalid effect %q: must be %q or %q", raw, EffectAllow, EffectDeny)
 	}
-	return EffectAllow
+}
+
+// ParseEffect validates and maps a textual effect.
+func ParseEffect(raw string) (Effect, error) {
+	return parseEffect(raw)
 }
 
 // Store holds the active rule set and swaps it on reload.
 type Store struct {
+	mu    sync.RWMutex
 	rules *RuleSet
 }
 
@@ -99,6 +118,8 @@ func NewStore(rs *RuleSet) *Store {
 
 // Current returns the active rule set. The returned value is read-only.
 func (s *Store) Current() *RuleSet {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.rules
 }
 
@@ -109,12 +130,21 @@ func (s *Store) Replace(data []byte) error {
 	if err != nil {
 		return err
 	}
-	next.Version = s.rules.Version + 1
+
+	s.mu.Lock()
+	currentVersion := uint64(0)
+	if s.rules != nil {
+		currentVersion = s.rules.Version
+	}
+	next.Version = currentVersion + 1
 	s.rules = next
+	s.mu.Unlock()
 	return nil
 }
 
 // Version reports the version of the active rule set.
 func (s *Store) Version() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.rules.Version
 }

@@ -7,13 +7,12 @@ import "strings"
 // Prefix is the level that starts every namespaced topic.
 const Prefix = "tenant"
 
-// NormalizeTopic canonicalizes topic for comparison.
+var encodedSlash = strings.NewReplacer("%2F", "/", "%2f", "/")
+
+// NormalizeTopic canonicalizes topic for comparison. Encoded slashes are
+// decoded, but case and all significant slash positions are preserved.
 func NormalizeTopic(topic string) string {
-	parts := strings.Split(topic, "/")
-	if len(parts) >= 2 && parts[0] == Prefix {
-		parts[1] = strings.ToLower(parts[1])
-	}
-	return strings.Join(parts, "/")
+	return encodedSlash.Replace(topic)
 }
 
 // TenantOf returns the tenant id of a topic, or "" when the topic is not

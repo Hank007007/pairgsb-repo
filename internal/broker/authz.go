@@ -24,8 +24,16 @@ type Authorizer struct {
 	audit    *audit.Logger
 
 	mu        sync.Mutex
-	decisions map[string]acl.Verdict
-	grants    map[string]acl.Verdict
+	decisions map[decisionCacheKey]acl.Verdict
+}
+
+type decisionCacheKey struct {
+	clientID       string
+	principalClass string
+	action         string
+	subject        string
+	tenantID       string
+	version        uint64
 }
 
 // NewAuthorizer returns an Authorizer backed by store.
@@ -37,64 +45,147 @@ func NewAuthorizer(store *acl.Store, log *audit.Logger) *Authorizer {
 		store:     store,
 		compiled:  acl.NewCompiledCache(),
 		audit:     log,
-		decisions: make(map[string]acl.Verdict),
-		grants:    make(map[string]acl.Verdict),
+		decisions: make(map[decisionCacheKey]acl.Verdict),
 	}
 }
 
 // Store exposes the rule store so callers can reload it.
 func (a *Authorizer) Store() *acl.Store { return a.store }
 
-// Reload installs a new policy document.
+// Reload installs a new policy document and invalidates cached decisions.
 func (a *Authorizer) Reload(data []byte) error {
-	return a.store.Replace(data)
+	if err := a.store.Replace(data); err != nil {
+		return err
+	}
+
+	a.compiled.Purge()
+	a.mu.Lock()
+	a.decisions = make(map[decisionCacheKey]acl.Verdict)
+	a.mu.Unlock()
+	return nil
 }
 
-func decisionKey(conn *Connection, action, subject string) string {
-	return conn.ClientID + "|" + subject
+func connectionIdentity(conn *Connection) (clientID, principalClass string) {
+	if conn == nil {
+		return "", ""
+	}
+	return conn.ClientID, conn.PrincipalClass
+}
+
+func (a *Authorizer) cachedDecision(key decisionCacheKey) (acl.Verdict, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	v, ok := a.decisions[key]
+	return v, ok
+}
+
+func (a *Authorizer) storeDecision(key decisionCacheKey, verdict acl.Verdict) {
+	a.mu.Lock()
+	a.decisions[key] = verdict
+	a.mu.Unlock()
 }
 
 // AuthorizeSubscribe reports whether conn may subscribe to filter.
 func (a *Authorizer) AuthorizeSubscribe(conn *Connection, filter string) bool {
-	tenantID := tenant.TenantOf(filter)
+	clientID, principalClass := connectionIdentity(conn)
+	rs := a.store.Current()
 
-	a.mu.Lock()
-	if v, ok := a.decisions[decisionKey(conn, acl.ActionSubscribe, filter)]; ok {
-		a.mu.Unlock()
-		a.recordSubscribe(conn, filter, v)
-		return v.Allowed
+	parsed, _, sharedErr := acl.ParseSharedFilter(filter)
+	canonicalFilter := parsed.Filter
+	tenantID := tenant.TenantOf(canonicalFilter)
+
+	if sharedErr != nil {
+		verdict := acl.Verdict{Allowed: false, Reason: sharedErr.Error()}
+		a.recordSubscribe(clientID, principalClass, filter, tenant.TenantOf(filter), verdict)
+		return false
 	}
-	a.mu.Unlock()
 
-	compiled := a.compiled.Compile(a.store.Current(), tenantID, conn.PrincipalClass, filter)
+	key := decisionCacheKey{
+		clientID:       clientID,
+		principalClass: principalClass,
+		action:         acl.ActionSubscribe,
+		subject:        canonicalFilter,
+		tenantID:       tenantID,
+		version:        rs.Version,
+	}
+	if verdict, ok := a.cachedDecision(key); ok {
+		a.recordSubscribe(clientID, principalClass, filter, tenantID, verdict)
+		return verdict.Allowed
+	}
 
-	verdict := acl.Verdict{Allowed: false, Reason: "no matching rule"}
-	for _, v := range compiled.Verdicts {
-		if v.Allowed {
-			verdict = v
-			break
+	var verdict acl.Verdict
+	if canonicalFilter == "" || !acl.ValidFilter(canonicalFilter) {
+		verdict = acl.Verdict{Allowed: false, Reason: "invalid topic filter"}
+	} else {
+		compiled := a.compiled.Compile(rs, tenantID, principalClass, canonicalFilter)
+		verdict = subscribeExpansionVerdict(rs, compiled)
+		if coverage := acl.CheckSubscription(rs, principalClass, canonicalFilter); !coverage.Allowed {
+			verdict = coverage
 		}
 	}
 
-	a.mu.Lock()
-	a.decisions[decisionKey(conn, acl.ActionSubscribe, filter)] = verdict
-	a.mu.Unlock()
-
-	a.recordSubscribe(conn, filter, verdict)
+	a.storeDecision(key, verdict)
+	a.recordSubscribe(clientID, principalClass, filter, tenantID, verdict)
 	return verdict.Allowed
 }
 
-func (a *Authorizer) recordSubscribe(conn *Connection, filter string, v acl.Verdict) {
+func subscribeExpansionVerdict(rs *acl.RuleSet, compiled acl.Compiled) acl.Verdict {
+	ruleOrder := make(map[string]int)
+	if rs != nil {
+		for i, rule := range rs.Rules {
+			ruleOrder[rule.ID] = i
+		}
+	}
+
+	var uncovered acl.Verdict
+	haveUncovered := false
+	var denied acl.Verdict
+	haveDenied := false
+	deniedOrder := 0
+
+	for _, verdict := range compiled.Verdicts {
+		if verdict.Allowed {
+			continue
+		}
+		if verdict.RuleID == "" {
+			if !haveUncovered {
+				uncovered = verdict
+				haveUncovered = true
+			}
+			continue
+		}
+
+		order, known := ruleOrder[verdict.RuleID]
+		if !known {
+			order = len(ruleOrder)
+		}
+		if !haveDenied || order < deniedOrder {
+			denied = verdict
+			deniedOrder = order
+			haveDenied = true
+		}
+	}
+
+	if haveDenied {
+		return denied
+	}
+	if haveUncovered {
+		return uncovered
+	}
+	return acl.Verdict{Allowed: true}
+}
+
+func (a *Authorizer) recordSubscribe(clientID, principalClass, filter, tenantID string, verdict acl.Verdict) {
 	ev := audit.Event{
 		Action:         acl.ActionSubscribe,
-		ClientID:       conn.ClientID,
-		PrincipalClass: conn.PrincipalClass,
+		ClientID:       clientID,
+		PrincipalClass: principalClass,
 		Filter:         filter,
-		Tenant:         tenant.TenantOf(filter),
-		RuleID:         v.RuleID,
-		Reason:         v.Reason,
+		Tenant:         tenantID,
+		RuleID:         verdict.RuleID,
+		Reason:         verdict.Reason,
 	}
-	if v.Allowed {
+	if verdict.Allowed {
 		a.audit.Allow(ev)
 		return
 	}
@@ -103,56 +194,52 @@ func (a *Authorizer) recordSubscribe(conn *Connection, filter string, v acl.Verd
 
 // AuthorizePublish reports whether conn may publish to topic.
 func (a *Authorizer) AuthorizePublish(conn *Connection, topic string) bool {
-	a.mu.Lock()
-	if v, ok := a.decisions[decisionKey(conn, acl.ActionPublish, topic)]; ok {
-		a.mu.Unlock()
-		a.recordPublish(conn, topic, v)
-		return v.Allowed
+	clientID, principalClass := connectionIdentity(conn)
+	rs := a.store.Current()
+	normalizedTopic := tenant.NormalizeTopic(topic)
+	tenantID := tenant.TenantOf(normalizedTopic)
+
+	key := decisionCacheKey{
+		clientID:       clientID,
+		principalClass: principalClass,
+		action:         acl.ActionPublish,
+		subject:        normalizedTopic,
+		tenantID:       tenantID,
+		version:        rs.Version,
 	}
-	a.mu.Unlock()
-
-	rule, ok := acl.RuleMatches(a.store.Current(), conn.PrincipalClass, acl.ActionPublish, topic)
-	verdict := acl.Verdict{Allowed: false, Reason: "no matching rule"}
-	if ok {
-		verdict = acl.Verdict{
-			Allowed: rule.Effect == acl.EffectAllow,
-			RuleID:  rule.ID,
-		}
+	if verdict, ok := a.cachedDecision(key); ok {
+		a.recordPublish(clientID, principalClass, normalizedTopic, tenantID, verdict)
+		return verdict.Allowed
 	}
 
-	a.mu.Lock()
-	a.decisions[decisionKey(conn, acl.ActionPublish, topic)] = verdict
-	a.mu.Unlock()
-
-	a.recordPublish(conn, topic, verdict)
+	verdict := acl.Evaluate(rs, principalClass, acl.ActionPublish, normalizedTopic)
+	a.storeDecision(key, verdict)
+	a.recordPublish(clientID, principalClass, normalizedTopic, tenantID, verdict)
 	return verdict.Allowed
 }
 
-func (a *Authorizer) recordPublish(conn *Connection, topic string, v acl.Verdict) {
+func (a *Authorizer) recordPublish(clientID, principalClass, topic, tenantID string, verdict acl.Verdict) {
 	ev := audit.Event{
 		Action:         acl.ActionPublish,
-		ClientID:       conn.ClientID,
-		PrincipalClass: conn.PrincipalClass,
+		ClientID:       clientID,
+		PrincipalClass: principalClass,
 		Topic:          topic,
-		Tenant:         tenant.TenantOf(topic),
-		RuleID:         v.RuleID,
-		Reason:         v.Reason,
+		Tenant:         tenantID,
+		RuleID:         verdict.RuleID,
+		Reason:         verdict.Reason,
 	}
-	if v.Allowed {
+	if verdict.Allowed {
 		a.audit.Allow(ev)
 		return
 	}
 	a.audit.Deny(ev)
 }
 
-// Subscribe asks the policy and, on approval, records the subscription.
+// Subscribe asks the policy and, on approval, returns the subscription. No
+// subscription state is created for a denied filter.
 func (a *Authorizer) Subscribe(conn *Connection, filter string) (*Subscription, bool) {
 	if !a.AuthorizeSubscribe(conn, filter) {
 		return nil, false
 	}
-	sub := &Subscription{Conn: conn, Filter: filter}
-	a.mu.Lock()
-	a.grants[decisionKey(conn, acl.ActionSubscribe, filter)] = acl.Verdict{Allowed: true}
-	a.mu.Unlock()
-	return sub, true
+	return &Subscription{Conn: conn, Filter: filter}, true
 }

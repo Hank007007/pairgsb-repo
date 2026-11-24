@@ -13,29 +13,32 @@ type Subscription struct {
 }
 
 // Deliver reports whether a message published on topic should be handed to
-// sub.
+// sub. Matching uses the inner filter of a shared subscription, while
+// authorization is always evaluated against the current principal and policy
+// version.
 func (a *Authorizer) Deliver(sub *Subscription, topic string) bool {
-	if sub == nil || sub.Conn == nil {
+	if sub == nil || sub.Conn == nil || a == nil {
 		return false
 	}
 
-	a.mu.Lock()
-	verdict, ok := a.grants[decisionKey(sub.Conn, acl.ActionSubscribe, sub.Filter)]
-	a.mu.Unlock()
+	normalizedTopic := tenant.NormalizeTopic(topic)
+	parsed, _, err := acl.ParseSharedFilter(sub.Filter)
+	if err != nil {
+		return false
+	}
+	if !acl.Match(parsed.Filter, normalizedTopic) {
+		return false
+	}
 
-	if !ok {
-		return false
-	}
-	if !acl.Match(sub.Filter, topic) {
-		return false
-	}
+	principalClass := sub.Conn.PrincipalClass
+	verdict := acl.Evaluate(a.store.Current(), principalClass, acl.ActionSubscribe, normalizedTopic)
 
 	ev := audit.Event{
 		Action:         acl.ActionSubscribe,
 		ClientID:       sub.Conn.ClientID,
-		PrincipalClass: sub.Conn.PrincipalClass,
-		Topic:          topic,
-		Tenant:         tenant.TenantOf(topic),
+		PrincipalClass: principalClass,
+		Topic:          normalizedTopic,
+		Tenant:         tenant.TenantOf(normalizedTopic),
 		RuleID:         verdict.RuleID,
 		Reason:         verdict.Reason,
 	}

@@ -1,0 +1,54 @@
+{
+  "folders": {
+    "INBOX": {"delimiter": "/", "children": ["收件箱 & 归档", "Archive"]},
+    "收件箱 & 归档": {"delimiter": "/", "children": []}
+  },
+  "requests": [
+    {
+      "id": "list-chinese-folder",
+      "op": "fetch",
+      "folder": "收件箱 & 归档",
+      "uids": "1:10",
+      "section": "",
+      "note": "列出中文文件夹前 10 封"
+    },
+    {
+      "id": "search-quoted-label",
+      "op": "search",
+      "folder": "收件箱 & 归档",
+      "criteria": {
+        "charset": "UTF-8",
+        "from": "alice@example.com",
+        "subject": "季度 \"Q3\" 报告"
+      },
+      "note": "按带引号的标签搜"
+    },
+    {
+      "id": "search-newline-label",
+      "op": "search",
+      "folder": "INBOX",
+      "criteria": {
+        "subject": "promo\r\nA9 LOGOUT"
+      },
+      "note": "标签里带换行"
+    },
+    {
+      "id": "search-long-subject",
+      "op": "search",
+      "folder": "INBOX",
+      "criteria": {
+        "charset": "UTF-8",
+        "subject": "季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告"
+      },
+      "note": "超过 1024 字节的关键词"
+    },
+    {
+      "id": "store-many-uids",
+      "op": "store",
+      "folder": "INBOX",
+      "uids": "1,1,2,3:5,9",
+      "flags": ["\\Seen"],
+      "note": "批量标记已读"
+    }
+  ]
+}

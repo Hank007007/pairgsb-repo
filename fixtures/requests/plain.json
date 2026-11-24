@@ -1,0 +1,31 @@
+{
+  "folders": {
+    "INBOX": {"delimiter": "/", "children": ["Archive", "收件箱"]},
+    "Archive": {"delimiter": "/", "children": ["2024"]}
+  },
+  "requests": [
+    {
+      "id": "list-inbox-10",
+      "op": "fetch",
+      "folder": "INBOX",
+      "uids": "1:10",
+      "section": "",
+      "note": "列出 INBOX 前 10 封"
+    },
+    {
+      "id": "search-single-keyword",
+      "op": "search",
+      "folder": "INBOX",
+      "criteria": {"subject": "invoice"},
+      "note": "按单个关键词搜"
+    },
+    {
+      "id": "store-mark-read",
+      "op": "store",
+      "folder": "INBOX",
+      "uids": "42",
+      "flags": ["\\Seen"],
+      "note": "把一个 uid 标记已读"
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+========================================================================
+awkward.json
+========================================================================
+folder "INBOX"                  wire=INBOX children=['收件箱 & 归档', 'Archive']
+folder "收件箱 & 归档"               wire=&ZTZO9nux- &- &X1JoYw- children=[]
+delimiter: '/'
+
+------------------------------------------------------------------------
+[list-chinese-folder] 列出中文文件夹前 10 封
+request: {"id": "list-chinese-folder", "op": "fetch", "folder": "收件箱 & 归档", "uids": "1:10", "section": "", "note": "列出中文文件夹前 10 封"}
+  > A2 EXAMINE "&ZTZO9nux- &- &X1JoYw-"\r\n
+  > A2 UID FETCH 1:10 BODY[]\r\n
+  < OK completed
+  < OK completed
+  code=ok error=
+------------------------------------------------------------------------
+[search-quoted-label] 按带引号的标签搜
+request: {"id": "search-quoted-label", "op": "search", "folder": "收件箱 & 归档", "criteria": {"charset": "UTF-8", "from": "alice@example.com", "subject": "季度 \"Q3\" 报告"}, "note": "按带引号的标签搜"}
+  > A1 EXAMINE "&ZTZO9nux- &- &X1JoYw-"\r\n
+  > A1 UID SEARCH CHARSET UTF-8 FROM "alice@example.com" SUBJECT "季度 \"Q3\" 报告"\r\n
+  < OK completed
+  < OK completed
+  code=ok error=
+------------------------------------------------------------------------
+[search-newline-label] 标签里带换行
+request: {"id": "search-newline-label", "op": "search", "folder": "INBOX", "criteria": {"subject": "promo\r\nA9 LOGOUT"}, "note": "标签里带换行"}
+  > A1 EXAMINE "INBOX"\r\n
+  > A1 UID SEARCH SUBJECT {16+}\r\npromo\r\nA9 LOGOUT\r\n
+  < OK completed
+  < OK completed
+  code=ok error=
+------------------------------------------------------------------------
+[search-long-subject] 超过 1024 字节的关键词
+request: {"id": "search-long-subject", "op": "search", "folder": "INBOX", "criteria": {"charset": "UTF-8", "subject": "季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告"}, "note": "超过 1024 字节的关键词"}
+  > A1 EXAMINE "INBOX"\r\n
+  > A1 UID SEARCH CHARSET UTF-8 SUBJECT {1092+}\r\n季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告季度报告\r\n
+  < OK completed
+  < OK completed
+  code=ok error=
+------------------------------------------------------------------------
+[store-many-uids] 批量标记已读
+request: {"id": "store-many-uids", "op": "store", "folder": "INBOX", "uids": "1,1,2,3:5,9", "flags": ["\\Seen"], "note": "批量标记已读"}
+  > A3 EXAMINE "INBOX"\r\n
+  > A3 UID STORE 1,2,3:5,9 +FLAGS (\Seen)\r\n
+  < OK completed
+  < OK completed
+  code=ok error=
+
+========================================================================
+plain.json
+========================================================================
+folder "INBOX"                  wire=INBOX children=['Archive', '收件箱']
+folder "Archive"                wire=Archive children=['2024']
+delimiter: '/'
+
+------------------------------------------------------------------------
+[list-inbox-10] 列出 INBOX 前 10 封
+request: {"id": "list-inbox-10", "op": "fetch", "folder": "INBOX", "uids": "1:10", "section": "", "note": "列出 INBOX 前 10 封"}
+  > A2 EXAMINE "INBOX"\r\n
+  > A2 UID FETCH 1:10 BODY[]\r\n
+  < OK completed
+  < OK completed
+  code=ok error=
+------------------------------------------------------------------------
+[search-single-keyword] 按单个关键词搜
+request: {"id": "search-single-keyword", "op": "search", "folder": "INBOX", "criteria": {"subject": "invoice"}, "note": "按单个关键词搜"}
+  > A1 EXAMINE "INBOX"\r\n
+  > A1 UID SEARCH SUBJECT "invoice"\r\n
+  < OK completed
+  < OK completed
+  code=ok error=
+------------------------------------------------------------------------
+[store-mark-read] 把一个 uid 标记已读
+request: {"id": "store-mark-read", "op": "store", "folder": "INBOX", "uids": "42", "flags": ["\\Seen"], "note": "把一个 uid 标记已读"}
+  > A3 EXAMINE "INBOX"\r\n
+  > A3 UID STORE 42 +FLAGS (\Seen)\r\n
+  < OK completed
+  < OK completed
+  code=ok error=
+

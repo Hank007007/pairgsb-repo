@@ -8,6 +8,8 @@ from __future__ import annotations
 import datetime
 
 from ..errors import BadRequest
+from ..proto.quote import quote_astring
+from .uidset import format_uidset, parse_uidset
 
 # Wire names for the text keys.
 _TEXT_KEYS = {
@@ -56,13 +58,6 @@ _MONTHS = (
     "Dec",
 )
 
-# Keys handled by the request path.
-_SIMPLE_TEXT = {
-    "from": "FROM",
-    "subject": "SUBJECT",
-    "text": "TEXT",
-}
-
 
 def normalize_key(key: str) -> str:
     """Return the canonical frontend spelling of *key*."""
@@ -73,10 +68,16 @@ def _format_date(value: object) -> str:
     if not isinstance(value, str):
         raise BadRequest("date value must be a string")
     parts = value.split("-")
-    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+    if (
+        len(parts) != 3
+        or len(parts[0]) != 4
+        or len(parts[1]) != 2
+        or len(parts[2]) != 2
+        or not all(part.isascii() and part.isdigit() for part in parts)
+    ):
         raise BadRequest("date must be YYYY-MM-DD: %r" % (value,))
     year, month, day = (int(part) for part in parts)
-    if year < 1900 or not 1 <= month <= 12:
+    if not 1 <= month <= 12:
         raise BadRequest("date out of range: %r" % (value,))
     try:
         datetime.date(year, month, day)
@@ -122,6 +123,7 @@ def validate_criteria(payload: object) -> dict[str, object]:
         elif key == "uid":
             if not isinstance(value, str) or not value:
                 raise BadRequest("uid requires a uid set")
+            parse_uidset(value)
         else:
             raise BadRequest("unsupported search key: %s" % raw_key)
         normalized[key] = value
@@ -130,13 +132,25 @@ def validate_criteria(payload: object) -> dict[str, object]:
 
 def parse_criteria(payload: dict) -> list[str]:
     """Translate a frontend criteria object into ``UID SEARCH`` arguments."""
+    normalized = validate_criteria(payload)
     arguments: list[str] = []
     charset = None
-    for key, value in payload.items():
+    for key, value in normalized.items():
         if key == "charset":
             charset = value
-        elif key in _SIMPLE_TEXT:
-            arguments.append("%s %s" % (_SIMPLE_TEXT[key], value))
+        elif key in _TEXT_KEYS:
+            arguments.extend([_TEXT_KEYS[key], quote_astring(value)])
+        elif key in _DATE_KEYS:
+            arguments.extend([_DATE_KEYS[key], _format_date(value)])
+        elif key in _NUMBER_KEYS:
+            arguments.extend([_NUMBER_KEYS[key], str(value)])
+        elif key in _FLAG_KEYS:
+            if value:
+                arguments.append(_FLAG_KEYS[key])
+            else:
+                arguments.extend(["NOT", _FLAG_KEYS[key]])
+        elif key == "uid":
+            arguments.extend(["UID", format_uidset(parse_uidset(value))])
     if charset is not None:
-        arguments.insert(0, "CHARSET %s" % charset)
+        arguments[0:0] = ["CHARSET", charset]
     return arguments

@@ -1,0 +1,21 @@
+{
+  "batch": "2026-11-prod",
+  "dwell": 2,
+  "services": {
+    "signer": {"endpoint": "https://signer.example.test", "secret": "svc-signer"},
+    "objstore": {"endpoint": "https://objstore.example.test", "secret": "svc-objstore"}
+  },
+  "keys": [
+    {"name": "objstore.prod", "service": "objstore", "slot": "prod",
+     "current": {"id": "obj_old_1", "secret": "obj-old-secret"}},
+    {"name": "signer.prod", "service": "signer", "slot": "prod",
+     "depends_on": ["objstore.prod"],
+     "current": {"id": "sig_old_1", "secret": "sig-old-secret"}}
+  ],
+  "consumers": [
+    {"name": "billing", "endpoint": "http://billing.internal.test", "secret": "billing-secret"},
+    {"name": "invoicing", "endpoint": "http://invoicing.internal.test", "secret": "invoicing-secret"}
+  ],
+  "notify": {"max_attempts": 5, "backoff_base": 1.0, "backoff_cap": 8.0,
+             "ack_timeout": 30, "poll_interval": 1.0}
+}

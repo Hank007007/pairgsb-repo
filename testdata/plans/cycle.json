@@ -1,0 +1,20 @@
+{
+  "batch": "2026-11-cycle",
+  "dwell": 2,
+  "services": {
+    "signer": {"endpoint": "https://signer.example.test", "secret": "svc-signer"},
+    "objstore": {"endpoint": "https://objstore.example.test", "secret": "svc-objstore"},
+    "paygate": {"endpoint": "https://paygate.example.test", "secret": "svc-paygate"}
+  },
+  "keys": [
+    {"name": "signer.prod", "service": "signer", "slot": "prod",
+     "depends_on": ["objstore.prod"]},
+    {"name": "objstore.prod", "service": "objstore", "slot": "prod",
+     "depends_on": ["paygate.prod"]},
+    {"name": "paygate.prod", "service": "paygate", "slot": "prod",
+     "depends_on": ["signer.prod"]}
+  ],
+  "consumers": [
+    {"name": "ledger", "endpoint": "http://ledger.internal.test", "secret": "ledger-secret"}
+  ]
+}

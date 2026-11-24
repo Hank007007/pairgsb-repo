@@ -62,7 +62,11 @@ async function main(argv) {
 
   let headers;
   try {
-    headers = emit_headers(parsed);
+    const tenantEndpoint = parsed['report-to'] && parsed['report-to'][0];
+    headers = emit_headers(merged, {
+      reportEndpoint: tenantEndpoint,
+      strictEndpoints: true,
+    });
   } catch (error) {
     process.stderr.write(`emit error: ${error.message}\n`);
     return 1;

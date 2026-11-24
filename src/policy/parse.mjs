@@ -4,6 +4,8 @@ import { PolicyError } from './error.mjs';
 
 const ALLOWED_SCHEMES = new Set(['https']);
 const HOSTNAME_LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+const DIRECTIVE_NAME = /^[A-Za-z][A-Za-z0-9-]*$/;
+const TEXT_WHITESPACE = /[ \t\v\f\n\r\u3000]+/;
 
 // Parses a tenant policy into { directiveName: [source, ...] }.
 //
@@ -18,47 +20,50 @@ export function parse_policy(input) {
 }
 
 function parse_text(text) {
-  const directives = {};
+  const occurrences = [];
   let name = null;
-  let sources = null;
+  let sources = [];
+
+  const finish_directive = () => {
+    if (name === null) return;
+    occurrences.push({ name, sources });
+    name = null;
+    sources = [];
+  };
 
   for (const token of tokenize(text)) {
     if (token.value === '') {
-      if (token.directiveBreak && name !== null) {
-        directives[name] = sources;
-        name = null;
-        sources = null;
-      }
+      if (token.directiveBreak) finish_directive();
       continue;
     }
+
     if (name === null) {
       name = token.value;
       sources = [];
     } else {
       sources.push(token.value);
     }
+
     if (token.directiveBreak) {
-      directives[name] = sources;
-      name = null;
-      sources = null;
+      finish_directive();
     }
   }
 
-  if (name !== null) directives[name] = sources;
-  return directives;
+  finish_directive();
+  return build_policy(occurrences);
 }
 
 function parse_document(document) {
-  const directives = {};
+  const occurrences = [];
   for (const [name, value] of Object.entries(document)) {
-    directives[name] = document_sources(name, value);
+    occurrences.push({ name, sources: document_sources(name, value) });
   }
-  return directives;
+  return build_policy(occurrences);
 }
 
 function document_sources(name, value) {
   if (typeof value === 'string') {
-    return value.split(/\s+/).filter((part) => part !== '');
+    return value.split(TEXT_WHITESPACE).filter((part) => part !== '');
   }
   if (Array.isArray(value)) {
     return value.map((entry) => {
@@ -75,6 +80,62 @@ function document_sources(name, value) {
     `directive "${name}" must be a string or an array of strings`,
     { directive: name, value },
   );
+}
+
+function build_policy(occurrences) {
+  const directives = {};
+
+  for (const occurrence of occurrences) {
+    const rawName = occurrence.name;
+    if (typeof rawName !== 'string' || !DIRECTIVE_NAME.test(rawName)) {
+      throw new PolicyError(`invalid directive name ${JSON.stringify(rawName)}`, {
+        directive: rawName,
+      });
+    }
+
+    const name = rawName.toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(directives, name)) {
+      directives[name] = [];
+    }
+
+    for (const rawSource of occurrence.sources) {
+      const source = normalize_source(rawSource);
+      validate_source_expression(name, source);
+      add_unique(directives[name], source);
+    }
+
+    validate_none_only(name, directives[name]);
+  }
+
+  return directives;
+}
+
+export function normalize_source(source) {
+  if (
+    typeof source === 'string' &&
+    source.length >= 2 &&
+    source.startsWith("'") &&
+    source.endsWith("'")
+  ) {
+    const inner = source.slice(1, -1);
+    if (POLICY_KEYWORD_INNER_SET.has(inner.toLowerCase())) {
+      return `'${inner.toLowerCase()}'`;
+    }
+  }
+  return source;
+}
+
+function add_unique(sources, source) {
+  if (!sources.includes(source)) sources.push(source);
+}
+
+function validate_none_only(name, sources) {
+  if (sources.includes("'none'") && sources.length > 1) {
+    throw new PolicyError(
+      `directive "${name}" cannot combine 'none' with another source`,
+      { directive: name, source: "'none'", sources: sources.slice() },
+    );
+  }
 }
 
 function is_plain_object(value) {
@@ -168,7 +229,9 @@ export function validate_source_expression(directive, source) {
     if (!/^(?:[0-9]+|\*)$/.test(port)) fail('port must be digits or "*"');
   }
 
-  if (host === '*') return true;
+  if (host === '*') {
+    fail('wildcard host must use the leading "*." label form');
+  }
 
   if (host.startsWith('*.')) {
     const hostname = host.slice(2);

@@ -35,6 +35,7 @@ export function handleExpand(service, body, principal) {
   const relation = requireString(body, 'relation');
 
   const options = {};
+  if (body.at_least !== undefined) options.at_least = body.at_least;
   if (body.contextualTuples !== undefined) options.contextualTuples = body.contextualTuples;
 
   return service.expand(object, relation, options);

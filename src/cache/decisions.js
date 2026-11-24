@@ -9,7 +9,8 @@
 
 import { isFresh } from '../store/consistency.js';
 
-export function createDecisionCache(options = {}) {  return {
+export function createDecisionCache(options = {}) {
+  return {
     entries: new Map(),
     limit: options.limit ?? 10_000,
   };
@@ -18,10 +19,19 @@ export function createDecisionCache(options = {}) {  return {
 /**
  * Build the cache key for a decision.
  *
- * @param {{tenant: string, object: object, relation: string, subject: object}} request
+ * @param {{tenant: string, object: object, relation: string, subject: object, contextual?: string[]}} request
  */
 export function decisionKey(request) {
-  return `${request.object.type}:${request.object.id}|${request.relation}|${request.subject.type}:${request.subject.id}`;
+  const parts = [
+    request.tenant ?? '',
+    `${request.object.type}:${request.object.id}`,
+    request.relation,
+    `${request.subject.type}:${request.subject.id}`,
+  ];
+  if (request.contextual && request.contextual.length > 0) {
+    parts.push([...request.contextual].sort().join(','));
+  }
+  return parts.join('|');
 }
 
 export function getDecision(cache, key) {

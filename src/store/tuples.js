@@ -8,7 +8,7 @@
 
 import { AuthError, ErrorCodes } from '../errors.js';
 import { parseTuple, formatObjectRef, formatTupleParts } from '../tuple.js';
-import { bump, currentVersion, currentZookie } from './consistency.js';
+import { bump, currentVersion } from './consistency.js';
 
 export function createTupleStore() {
   return {
@@ -18,8 +18,8 @@ export function createTupleStore() {
   };
 }
 
-function tupleKey(tuple) {
-  return formatTupleParts(tuple.object, tuple.relation, tuple.subject);
+function tupleKey(tenant, tuple) {
+  return `${tenant}\u0000${formatTupleParts(tuple.object, tuple.relation, tuple.subject)}`;
 }
 
 /**
@@ -36,7 +36,7 @@ export function write(store, tenant, input) {
   const zookie = bump(store, tenant);
   const version = currentVersion(store, tenant);
 
-  const key = tupleKey(tuple);
+  const key = tupleKey(tenant, tuple);
   const history = store.rows.get(key) ?? [];
   history.push({
     object: tuple.object,
@@ -60,8 +60,10 @@ export function write(store, tenant, input) {
  */
 export function deleteTuple(store, tenant, input) {
   const tuple = parseTuple(input, ErrorCodes.INVALID_TUPLE);
-  const key = tupleKey(tuple);
+  const key = tupleKey(tenant, tuple);
   const history = store.rows.get(key) ?? [];
+
+  const zookie = bump(store, tenant);
   const version = currentVersion(store, tenant);
 
   let deleted = false;
@@ -74,7 +76,7 @@ export function deleteTuple(store, tenant, input) {
     }
   }
 
-  return { tuple: tuple.text, zookie: currentZookie(store, tenant), deleted };
+  return { tuple: tuple.text, zookie, deleted };
 }
 
 export { deleteTuple as delete };
@@ -91,7 +93,7 @@ export { deleteTuple as delete };
  */
 export function read(store, tenant, object, relation, options = {}) {
   const asOf = options.asOf ?? currentVersion(store, tenant);
-  const prefix = `${formatObjectRef(object)}#${relation}@`;
+  const prefix = `${tenant}\u0000${formatObjectRef(object)}#${relation}@`;
   const subjects = [];
 
   for (const [key, history] of store.rows) {

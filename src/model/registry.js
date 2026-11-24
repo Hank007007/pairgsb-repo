@@ -8,6 +8,7 @@
 
 import { AuthError, ErrorCodes } from '../errors.js';
 import { isValidType } from '../tuple.js';
+import { compileNamespace } from './compile.js';
 
 const TENANT_PATTERN = /^[a-z0-9][a-z0-9_-]*$/i;
 
@@ -88,7 +89,12 @@ export function registerNamespace(registry, tenant, document) {
   }
 
   const stored = { name, version, relations };
+  // Loading validates the whole document. Unknown operators, malformed
+  // operands and dangling relation references must fail at registration time,
+  // not silently compile into some other operator.
+  const plan = compileNamespace(stored);
   space.documents.set(name, stored);
+  space.compiled.set(name, plan);
   return { name, version };
 }
 

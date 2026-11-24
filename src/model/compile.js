@@ -62,8 +62,16 @@ export function compileRewrite(rewrite, context = {}) {
   const operand = rewrite[operator];
 
   switch (operator) {
-    case 'this':
+    case 'this': {
+      if (!operand || typeof operand !== 'object' || Array.isArray(operand)) {
+        invalid(
+          namespace,
+          relation,
+          `namespace "${namespace}" relation "${relation}": "this" expects an object`,
+        );
+      }
       return { kind: 'this' };
+    }
 
     case 'computedUserset': {
       const target = operand && typeof operand === 'object' ? operand.relation : undefined;
@@ -104,7 +112,7 @@ export function compileRewrite(rewrite, context = {}) {
       if (!Array.isArray(operand)) {
         invalid(namespace, relation, `namespace "${namespace}" relation "${relation}": "intersection" expects an array`);
       }
-      return { kind: 'union', children: compileChildren(namespace, relation, 'intersection', operand) };
+      return { kind: 'intersection', children: compileChildren(namespace, relation, 'intersection', operand) };
     }
 
     case 'exclusion': {
@@ -126,10 +134,11 @@ export function compileRewrite(rewrite, context = {}) {
     }
 
     default:
-      return {
-        kind: 'union',
-        children: Array.isArray(operand) ? compileChildren(namespace, relation, operator, operand) : [],
-      };
+      invalid(
+        namespace,
+        relation,
+        `namespace "${namespace}" relation "${relation}": unknown operator "${operator}"`,
+      );
   }
 }
 
@@ -199,13 +208,13 @@ export function getCompiledNamespace(registry, tenant, name) {
     throw new AuthError(ErrorCodes.NAMESPACE_NOT_FOUND, `namespace "${name}" is not registered`, { namespace: name });
   }
 
-  let plan = space.compiled.get(name);
-  if (plan) return plan;
-
   const document = getNamespaceDocument(registry, tenant, name);
   if (!document) {
     throw new AuthError(ErrorCodes.NAMESPACE_NOT_FOUND, `namespace "${name}" is not registered`, { namespace: name });
   }
+
+  let plan = space.compiled.get(name);
+  if (plan && plan.version === document.version) return plan;
 
   plan = compileNamespace(document);
   space.compiled.set(name, plan);

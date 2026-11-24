@@ -40,7 +40,7 @@ export function handleCheck(service, body, principal) {
   const subject = requireString(body, 'subject');
 
   const options = {};
-  if (body.at_least !== undefined) options.atLeast = body.at_least;
+  if (body.at_least !== undefined) options.at_least = body.at_least;
   if (body.contextualTuples !== undefined) options.contextualTuples = body.contextualTuples;
 
   const allowed = service.check(object, relation, subject, options);

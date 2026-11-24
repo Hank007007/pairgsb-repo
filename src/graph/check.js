@@ -21,6 +21,7 @@ import {
   subjectMatches,
 } from '../tuple.js';
 import { getCompiledNamespace } from '../model/compile.js';
+import { getNamespaceDocument } from '../model/registry.js';
 import { read, parseContextualTuples } from '../store/tuples.js';
 import { resolveZookie, currentVersion } from '../store/consistency.js';
 import { decisionKey, getDecision, putDecision } from '../cache/decisions.js';
@@ -39,12 +40,10 @@ function frameName(object, relation) {
  * Read the subjects stored for `object#relation`, together with the
  * contextual tuples that belong to this request.
  */
-function subjectsFor(context, object, relation, depth) {
+function subjectsFor(context, object, relation) {
   const subjects = read(context.runtime.tuples, context.tenant, object, relation, {
     asOf: context.asOf,
   }).map((subject) => ({ ...subject }));
-
-  if (depth > 0) return subjects;
 
   for (const tuple of context.contextual) {
     if (tuple.object.type === object.type && tuple.object.id === object.id && tuple.relation === relation) {
@@ -57,7 +56,9 @@ function subjectsFor(context, object, relation, depth) {
 
 function planFor(context, object, relation) {
   try {
-    return getCompiledNamespace(context.runtime.namespaces, context.tenant, object.type);
+    const plan = getCompiledNamespace(context.runtime.namespaces, context.tenant, object.type);
+    context.namespaceVersions.set(plan.namespace, plan.version);
+    return plan;
   } catch (error) {
     if (error instanceof AuthError && error.code === ErrorCodes.NAMESPACE_NOT_FOUND) {
       throw new AuthError(ErrorCodes.NAMESPACE_NOT_FOUND, `namespace "${object.type}" is not registered`, {
@@ -72,6 +73,20 @@ function planFor(context, object, relation) {
 
 function missingNamespace(error) {
   return error instanceof AuthError && error.code === ErrorCodes.NAMESPACE_NOT_FOUND;
+}
+
+function decisionIsFresh(context, entry, plan) {
+  if (!entry || entry.tenant !== context.tenant) return false;
+  if (entry.snapshotVersion !== context.asOf) return false;
+
+  const versions = entry.namespaceVersions ?? {};
+  if (versions[plan.namespace] !== plan.version) return false;
+
+  for (const [name, version] of Object.entries(versions)) {
+    const document = getNamespaceDocument(context.runtime.namespaces, context.tenant, name);
+    if (!document || document.version !== version) return false;
+  }
+  return true;
 }
 
 /**
@@ -101,6 +116,7 @@ export function check(runtime, tenant, objectText, relation, subjectText, option
     subject,
     asOf: resolveZookie(runtime.tuples, tenant, options.at_least) ?? currentVersion(runtime.tuples, tenant),
     contextual: parseContextualTuples(options.contextualTuples),
+    namespaceVersions: new Map(),
   };
 
   // Resolve the namespace up front so that a missing namespace or an unknown
@@ -113,9 +129,15 @@ export function check(runtime, tenant, objectText, relation, subjectText, option
     });
   }
 
-  const key = decisionKey({ tenant, object, relation, subject });
+  const key = decisionKey({
+    tenant,
+    object,
+    relation,
+    subject,
+    contextual: context.contextual.map((tuple) => tuple.text),
+  });
   const cached = getDecision(runtime.decisions, key);
-  if (cached) {
+  if (decisionIsFresh(context, cached, plan)) {
     return cached.value;
   }
 
@@ -124,8 +146,8 @@ export function check(runtime, tenant, objectText, relation, subjectText, option
   putDecision(runtime.decisions, key, {
     tenant,
     value,
-    snapshotVersion: currentVersion(runtime.tuples, tenant),
-    namespaceVersions: { [plan.namespace]: plan.version },
+    snapshotVersion: context.asOf,
+    namespaceVersions: Object.fromEntries(context.namespaceVersions),
   });
 
   return value;
@@ -143,11 +165,14 @@ export function check(runtime, tenant, objectText, relation, subjectText, option
  */
 export function checkUserset(context, object, relation, depth = 0, visited = new Set()) {
   if (depth >= MAX_DEPTH) {
-    return false;
+    const frame = frameName(object, relation);
+    throw new AuthError(ErrorCodes.DEPTH_EXCEEDED, `evaluation exceeded ${MAX_DEPTH} levels at ${frame}`, {
+      frame,
+    });
   }
 
   const frame = frameName(object, relation);
-  if (visited.has(objectName(object))) {
+  if (visited.has(frame)) {
     throw new AuthError(ErrorCodes.CYCLE_DETECTED, `cycle detected at ${frame}`, { frame });
   }
 
@@ -160,11 +185,11 @@ export function checkUserset(context, object, relation, depth = 0, visited = new
     });
   }
 
-  visited.add(objectName(object));
+  visited.add(frame);
   try {
     return evalNode(node, object, relation, plan, context, depth, visited);
   } finally {
-    visited.delete(objectName(object));
+    visited.delete(frame);
   }
 }
 
@@ -192,7 +217,7 @@ function evalNode(node, object, relation, plan, context, depth, visited) {
 }
 
 function checkDirect(object, relation, context, depth, visited) {
-  for (const stored of subjectsFor(context, object, relation, depth)) {
+  for (const stored of subjectsFor(context, object, relation)) {
     if (isWildcard(stored)) {
       if (stored.type === context.subject.type) return true;
       continue;
@@ -223,7 +248,7 @@ function checkTupleToUserset(node, object, relation, plan, context, depth, visit
     );
   }
 
-  for (const target of subjectsFor(context, object, node.tuplesetRelation, depth)) {
+  for (const target of subjectsFor(context, object, node.tuplesetRelation)) {
     if (!isPlainSubject(target) || isWildcard(target)) continue;
     try {
       const member = checkUserset(context, { type: target.type, id: target.id }, node.computedRelation, depth + 1, visited);
@@ -253,11 +278,5 @@ function checkIntersection(node, object, relation, plan, context, depth, visited
 function checkExclusion(node, object, relation, plan, context, depth, visited) {
   const base = evalNode(node.base, object, relation, plan, context, depth, visited);
   if (!base) return false;
-
-  try {
-    return !evalNode(node.subtract, object, relation, plan, context, depth, visited);
-  } catch (error) {
-    if (error instanceof AuthError) return true;
-    throw error;
-  }
+  return !evalNode(node.subtract, object, relation, plan, context, depth, visited);
 }

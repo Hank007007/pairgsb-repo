@@ -17,13 +17,11 @@ import {
 import { getCompiledNamespace } from '../model/compile.js';
 import { read, parseContextualTuples } from '../store/tuples.js';
 import { resolveZookie, currentVersion } from '../store/consistency.js';
-import { decisionKey, getDecision, putDecision } from '../cache/decisions.js';
 
 const MAX_DEPTH = 25;
 
-function subjectsOf(store, tenant, object, relation, asOf, contextual, depth = 0) {
+function subjectsOf(store, tenant, object, relation, asOf, contextual) {
   const subjects = read(store, tenant, object, relation, { asOf }).map((subject) => ({ ...subject }));
-  if (depth > 0) return subjects;
   for (const tuple of contextual) {
     if (tuple.object.type === object.type && tuple.object.id === object.id && tuple.relation === relation) {
       subjects.push({ ...tuple.subject });
@@ -47,16 +45,6 @@ export function expand(runtime, tenant, objectText, relation, options = {}) {
   const asOf = resolveZookie(runtime.tuples, tenant, options.at_least) ?? currentVersion(runtime.tuples, tenant);
   const contextual = parseContextualTuples(options.contextualTuples);
 
-  const key = decisionKey({
-    tenant,
-    object,
-    relation,
-    subject: { type: '*', id: '*' },
-  });
-  const cached = getDecision(runtime.decisions, key);
-  if (cached) {
-    return cached.value;
-  }
   const seen = new Set();
   const out = [];
   const addSubject = (subject) => {
@@ -68,14 +56,11 @@ export function expand(runtime, tenant, objectText, relation, options = {}) {
 
   walk(runtime, tenant, object, relation, asOf, contextual, [], 0, addSubject);
 
-  const result = { object: formatObjectRef(object), relation, subjects: out };
-  putDecision(runtime.decisions, key, {
-    tenant,
-    value: result,
-    snapshotVersion: currentVersion(runtime.tuples, tenant),
-    namespaceVersions: {},
-  });
-  return result;
+  return { object: formatObjectRef(object), relation, subjects: out };
+}
+
+function missingNamespace(error) {
+  return error instanceof AuthError && error.code === ErrorCodes.NAMESPACE_NOT_FOUND;
 }
 
 function walk(runtime, tenant, object, relation, asOf, contextual, stack, depth, addSubject) {
@@ -119,25 +104,26 @@ function walkNode(runtime, tenant, object, relation, node, asOf, contextual, sta
 
   switch (node.kind) {
     case 'this':
-      for (const subject of subjectsOf(runtime.tuples, tenant, object, relation, asOf, contextual, depth)) {
-        if (isWildcard(subject)) continue;
+      for (const subject of subjectsOf(runtime.tuples, tenant, object, relation, asOf, contextual)) {
         if (isPlainSubject(subject)) {
           addSubject(subject);
           continue;
         }
-        const members = subjectsOf(
-          runtime.tuples,
-          tenant,
-          { type: subject.type, id: subject.id },
-          subject.relation,
-          asOf,
-          contextual,
-          depth + 1,
-        );
-        if (members.length === 0) continue;
-        for (const member of members) {
-          if (isWildcard(member)) continue;
-          addSubject(member);
+        try {
+          walk(
+            runtime,
+            tenant,
+            { type: subject.type, id: subject.id },
+            subject.relation,
+            asOf,
+            contextual,
+            stack,
+            depth + 1,
+            addSubject,
+          );
+        } catch (error) {
+          if (missingNamespace(error)) continue;
+          throw error;
         }
       }
       return;
@@ -147,19 +133,32 @@ function walkNode(runtime, tenant, object, relation, node, asOf, contextual, sta
       return;
 
     case 'tupleToUserset':
-      for (const subject of subjectsOf(runtime.tuples, tenant, object, node.tuplesetRelation, asOf, contextual, depth)) {
-        if (!isPlainSubject(subject) || isWildcard(subject)) continue;
-        walk(
-          runtime,
-          tenant,
-          { type: subject.type, id: subject.id },
-          node.computedRelation,
-          asOf,
-          contextual,
-          stack,
-          depth + 1,
-          addSubject,
+      if (plan.relations.get(node.tuplesetRelation)?.kind !== 'this') {
+        throw new AuthError(
+          ErrorCodes.INVALID_NAMESPACE,
+          `relation "${relation}" on namespace "${plan.namespace}": tupleToUserset reads ` +
+            `"${node.tuplesetRelation}", which is not a direct tuple relation`,
+          { namespace: plan.namespace, relation },
         );
+      }
+      for (const subject of subjectsOf(runtime.tuples, tenant, object, node.tuplesetRelation, asOf, contextual)) {
+        if (!isPlainSubject(subject) || isWildcard(subject)) continue;
+        try {
+          walk(
+            runtime,
+            tenant,
+            { type: subject.type, id: subject.id },
+            node.computedRelation,
+            asOf,
+            contextual,
+            stack,
+            depth + 1,
+            addSubject,
+          );
+        } catch (error) {
+          if (missingNamespace(error)) continue;
+          throw error;
+        }
       }
       return;
 

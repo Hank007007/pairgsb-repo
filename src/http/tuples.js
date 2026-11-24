@@ -9,6 +9,14 @@
 
 import { AuthError, ErrorCodes } from '../errors.js';
 
+function assertBodyTenant(body, principal) {
+  if (body.tenant !== undefined && body.tenant !== principal.tenant) {
+    throw new AuthError(ErrorCodes.TENANT_MISMATCH, 'body tenant does not match the authenticated principal', {
+      tenant: body.tenant,
+    });
+  }
+}
+
 function tupleFromBody(body) {
   if (typeof body.tuple === 'string') return body.tuple;
   if (body.object !== undefined || body.relation !== undefined || body.subject !== undefined) {
@@ -17,10 +25,11 @@ function tupleFromBody(body) {
   throw new AuthError(ErrorCodes.INVALID_TUPLE, 'request must supply "tuple" or object/relation/subject');
 }
 
-export function handleRegisterNamespace(service, body) {
+export function handleRegisterNamespace(service, body, principal) {
   if (!body || typeof body !== 'object') {
     throw new AuthError(ErrorCodes.INVALID_REQUEST, 'request body must be an object');
   }
+  if (principal) assertBodyTenant(body, principal);
   const registered = service.registerNamespace({
     name: body.name,
     version: body.version,
@@ -33,16 +42,18 @@ export function handleListNamespaces(service) {
   return { namespaces: service.listNamespaces() };
 }
 
-export function handleWrite(service, body) {
+export function handleWrite(service, body, principal) {
   if (!body || typeof body !== 'object') {
     throw new AuthError(ErrorCodes.INVALID_REQUEST, 'request body must be an object');
   }
+  if (principal) assertBodyTenant(body, principal);
   return service.write(tupleFromBody(body));
 }
 
-export function handleDelete(service, body) {
+export function handleDelete(service, body, principal) {
   if (!body || typeof body !== 'object') {
     throw new AuthError(ErrorCodes.INVALID_REQUEST, 'request body must be an object');
   }
+  if (principal) assertBodyTenant(body, principal);
   return service.delete(tupleFromBody(body));
 }

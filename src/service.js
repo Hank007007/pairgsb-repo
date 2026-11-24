@@ -9,11 +9,62 @@
 import {
   registerNamespace as registerNamespaceInRegistry,
   listNamespaces,
+  getNamespaceDocument,
 } from './model/registry.js';
 import { check } from './graph/check.js';
 import { expand } from './graph/expand.js';
 import { write, deleteTuple, read } from './store/tuples.js';
-import { parseObjectRef } from './tuple.js';
+import { parseObjectRef, parseTuple } from './tuple.js';
+import { AuthError, ErrorCodes } from './errors.js';
+
+function hasRelation(document, relation) {
+  return Object.prototype.hasOwnProperty.call(document.relations, relation);
+}
+
+function validateWrite(runtime, tenant, input) {
+  const tuple = parseTuple(input, ErrorCodes.INVALID_TUPLE);
+
+  const objectNamespace = getNamespaceDocument(runtime.namespaces, tenant, tuple.object.type);
+  if (!objectNamespace) {
+    throw new AuthError(
+      ErrorCodes.NAMESPACE_NOT_FOUND,
+      `namespace "${tuple.object.type}" is not registered in tenant "${tenant}"`,
+      { tenant, namespace: tuple.object.type, tuple: tuple.text },
+    );
+  }
+  if (!hasRelation(objectNamespace, tuple.relation)) {
+    throw new AuthError(
+      ErrorCodes.INVALID_TUPLE,
+      `namespace "${tuple.object.type}" has no relation "${tuple.relation}"`,
+      { tenant, namespace: tuple.object.type, relation: tuple.relation, tuple: tuple.text },
+    );
+  }
+
+  if (tuple.subject.kind === 'userset') {
+    const subjectNamespace = getNamespaceDocument(runtime.namespaces, tenant, tuple.subject.type);
+    if (!subjectNamespace) {
+      throw new AuthError(
+        ErrorCodes.NAMESPACE_NOT_FOUND,
+        `namespace "${tuple.subject.type}" is not registered in tenant "${tenant}"`,
+        { tenant, namespace: tuple.subject.type, tuple: tuple.text },
+      );
+    }
+    if (!hasRelation(subjectNamespace, tuple.subject.relation)) {
+      throw new AuthError(
+        ErrorCodes.INVALID_TUPLE,
+        `namespace "${tuple.subject.type}" has no relation "${tuple.subject.relation}"`,
+        {
+          tenant,
+          namespace: tuple.subject.type,
+          relation: tuple.subject.relation,
+          tuple: tuple.text,
+        },
+      );
+    }
+  }
+
+  return tuple;
+}
 
 /**
  * @param {object} runtime
@@ -41,11 +92,13 @@ export function createService(runtime, tenant) {
     },
 
     write(input) {
-      return write(runtime.tuples, tenant, input);
+      const tuple = validateWrite(runtime, tenant, input);
+      return write(runtime.tuples, tenant, tuple.text);
     },
 
     delete(input) {
-      return deleteTuple(runtime.tuples, tenant, input);
+      const tuple = validateWrite(runtime, tenant, input);
+      return deleteTuple(runtime.tuples, tenant, tuple.text);
     },
 
     readTuples(object, relation) {

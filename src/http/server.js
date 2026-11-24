@@ -102,16 +102,16 @@ export function createServer(options) {
 
       switch (route) {
         case 'POST /namespaces':
-          sendJson(response, 200, handleRegisterNamespace(service, body));
+          sendJson(response, 200, handleRegisterNamespace(service, body, principal));
           return;
         case 'GET /namespaces':
           sendJson(response, 200, handleListNamespaces(service));
           return;
         case 'POST /tuples':
-          sendJson(response, 200, handleWrite(service, body));
+          sendJson(response, 200, handleWrite(service, body, principal));
           return;
         case 'POST /tuples/delete':
-          sendJson(response, 200, handleDelete(service, body));
+          sendJson(response, 200, handleDelete(service, body, principal));
           return;
         case 'POST /check':
           sendJson(response, 200, handleCheck(service, body, principal));

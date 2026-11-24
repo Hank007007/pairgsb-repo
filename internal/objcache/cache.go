@@ -38,6 +38,7 @@ type Cache struct {
 	maxEntries int
 	ttl        time.Duration
 	entries    map[string]*entry
+	current    map[string]string
 	tick       int64
 }
 
@@ -52,12 +53,21 @@ func New(maxEntries int, ttl time.Duration) *Cache {
 		maxEntries: maxEntries,
 		ttl:        ttl,
 		entries:    make(map[string]*entry),
+		current:    make(map[string]string),
 	}
 }
 
-// Key builds the cache key for one object version.
+// Key builds the cache key for one object version. The tenant, the cleaned
+// object path and the object's ETag are joined with a separator none of them
+// can carry, so two distinct triples never produce the same key.
 func (c *Cache) Key(tenant, objectPath, etag string) string {
-	return path.Clean("/" + objectPath)
+	return tenant + "\x00" + path.Clean("/"+objectPath) + "\x00" + etag
+}
+
+// scope identifies one object across versions: everything in the key except
+// the ETag.
+func scope(tenant, objectPath string) string {
+	return tenant + "\x00" + path.Clean("/"+objectPath)
 }
 
 // Get returns the object stored under key while it is still fresh.
@@ -71,6 +81,7 @@ func (c *Cache) Get(key string) (*Object, bool) {
 	}
 	if c.ttl > 0 && time.Now().After(e.expires) {
 		delete(c.entries, key)
+		c.dropCurrentLocked(key)
 		return nil, false
 	}
 	c.tick++
@@ -78,8 +89,32 @@ func (c *Cache) Get(key string) (*Object, bool) {
 	return e.obj, true
 }
 
+// Current returns the key and the object of the live entry for tenant and
+// objectPath, whatever version it holds. Callers use it to find the entry a
+// new request should be checked against before they know the current ETag.
+func (c *Cache) Current(tenant, objectPath string) (string, *Object, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	s := scope(tenant, objectPath)
+	key, ok := c.current[s]
+	if !ok {
+		return "", nil, false
+	}
+	e, ok := c.entries[key]
+	if !ok || (c.ttl > 0 && time.Now().After(e.expires)) {
+		delete(c.entries, key)
+		delete(c.current, s)
+		return "", nil, false
+	}
+	c.tick++
+	e.used = c.tick
+	return key, e.obj, true
+}
+
 // Put stores obj under key, dropping the least recently used entry when the
-// cache is over capacity.
+// cache is over capacity. The entry becomes the current one for its tenant
+// and path; any older version of the same object is forgotten.
 func (c *Cache) Put(key string, obj *Object) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -90,6 +125,12 @@ func (c *Cache) Put(key string, obj *Object) {
 		expires: time.Now().Add(c.ttl),
 		used:    c.tick,
 	}
+
+	s := scope(obj.Tenant, obj.Path)
+	if old, ok := c.current[s]; ok && old != key {
+		delete(c.entries, old)
+	}
+	c.current[s] = key
 
 	for len(c.entries) > c.maxEntries {
 		c.evictOldestLocked()
@@ -109,6 +150,18 @@ func (c *Cache) evictOldestLocked() {
 		return
 	}
 	delete(c.entries, oldestKey)
+	c.dropCurrentLocked(oldestKey)
+}
+
+// dropCurrentLocked removes key from the current-version index if it is
+// indexed there.
+func (c *Cache) dropCurrentLocked(key string) {
+	for s, k := range c.current {
+		if k == key {
+			delete(c.current, s)
+			return
+		}
+	}
 }
 
 // Len reports how many entries are stored.

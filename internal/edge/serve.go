@@ -58,13 +58,15 @@ func (s *Server) Serve(w http.ResponseWriter, r *http.Request) {
 	tenant := r.Header.Get("X-Rangecarve-Tenant")
 	objectPath := path.Clean("/" + strings.TrimPrefix(r.URL.Path, "/"))
 
-	obj, fromCache, ok := s.lookup(r.Context(), tenant, objectPath, r.Header)
+	// Range only applies to GET; on anything else it is ignored.
+	rangeHeader := ""
+	if r.Method == http.MethodGet {
+		rangeHeader = r.Header.Get("Range")
+	}
+
+	obj, ok := s.lookup(r.Context(), tenant, objectPath, rangeHeader != "", r.Header)
 	if !ok {
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)
-		return
-	}
-	if obj.Status == http.StatusNotModified {
-		relayNotModified(w, obj)
 		return
 	}
 
@@ -74,12 +76,36 @@ func (s *Server) Serve(w http.ResponseWriter, r *http.Request) {
 		LastModified: obj.LastModified,
 		Header:       r.Header,
 	})
-	_ = decision
-
-	spans := rangehdr.Parse(r.Header.Get("Range"), obj.Size).Spans
-	if len(spans) == 0 {
-		spans = nil
+	switch decision.Kind {
+	case cond.KindNotModified:
+		writeMetadata(w.Header(), obj)
+		w.WriteHeader(http.StatusNotModified)
+		return
+	case cond.KindPreconditionFailed:
+		w.WriteHeader(http.StatusPreconditionFailed)
+		return
+	case cond.KindIgnoreRange:
+		rangeHeader = ""
 	}
+
+	var spans []rangehdr.Span
+	if rangeHeader != "" {
+		spec := rangehdr.Parse(rangeHeader, obj.Size)
+		switch spec.Outcome {
+		case rangehdr.OutcomeInvalid:
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		case rangehdr.OutcomeUnsatisfiable:
+			header := w.Header()
+			header.Set("Accept-Ranges", "bytes")
+			header.Set("Content-Range", "bytes */"+strconv.FormatInt(obj.Size, 10))
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		case rangehdr.OutcomeRanges:
+			spans = spec.Spans
+		}
+	}
+
 	built := respond.Build(respond.Object{
 		ETag:         obj.ETag,
 		LastModified: formatHTTPDate(obj.LastModified),
@@ -89,7 +115,7 @@ func (s *Server) Serve(w http.ResponseWriter, r *http.Request) {
 		Size:         obj.Size,
 	}, spans)
 
-	body := s.body(built, obj, spans, fromCache)
+	body := s.body(built, obj, spans)
 
 	header := w.Header()
 	for key, values := range built.HeaderMap() {
@@ -98,7 +124,6 @@ func (s *Server) Serve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if r.Method == http.MethodHead {
-		header.Set("Content-Length", strconv.FormatInt(int64(len(body)), 10))
 		w.WriteHeader(built.Status)
 		return
 	}
@@ -106,26 +131,23 @@ func (s *Server) Serve(w http.ResponseWriter, r *http.Request) {
 	w.Write(body)
 }
 
-// relayNotModified passes a revalidation result back to the client.
-func relayNotModified(w http.ResponseWriter, obj *objcache.Object) {
-	header := w.Header()
-	for key, value := range map[string]string{
-		"ETag":          obj.ETag,
-		"Last-Modified": formatHTTPDate(obj.LastModified),
-		"Cache-Control": obj.CacheControl,
-	} {
-		if value != "" {
-			header.Set(key, value)
-		}
+// writeMetadata echoes the validators a 304 response must carry.
+func writeMetadata(header http.Header, obj *objcache.Object) {
+	if obj.ETag != "" {
+		header.Set("ETag", obj.ETag)
 	}
-	w.WriteHeader(http.StatusNotModified)
+	if value := formatHTTPDate(obj.LastModified); value != "" {
+		header.Set("Last-Modified", value)
+	}
+	if obj.CacheControl != "" {
+		header.Set("Cache-Control", obj.CacheControl)
+	}
 }
 
 // body produces the bytes that accompany the header block Build assembled.
-func (s *Server) body(resp *respond.Response, obj *objcache.Object, spans []rangehdr.Span, fromCache bool) []byte {
-	if fromCache {
-		return obj.Body
-	}
+// Cached objects are sliced exactly like freshly fetched ones: the cache
+// holds whole objects, never ready-made responses.
+func (s *Server) body(resp *respond.Response, obj *objcache.Object, spans []rangehdr.Span) []byte {
 	switch len(spans) {
 	case 0:
 		return obj.Body
@@ -133,7 +155,7 @@ func (s *Server) body(resp *respond.Response, obj *objcache.Object, spans []rang
 		return cut(obj.Body, spans[0])
 	default:
 		body := renderParts(resp, obj.Body, spans)
-		resp.HeaderMap()["Content-Length"] = []string{strconv.FormatInt(spans[0].Len(), 10)}
+		resp.HeaderMap()["Content-Length"] = []string{strconv.FormatInt(int64(len(body)), 10)}
 		return body
 	}
 }
@@ -177,32 +199,77 @@ func renderParts(resp *respond.Response, content []byte, spans []rangehdr.Span) 
 
 // lookup answers from cache when it can and otherwise reads the object from
 // upstream, keeping a copy for later requests.
-func (s *Server) lookup(ctx context.Context, tenant, objectPath string, in http.Header) (*objcache.Object, bool, bool) {
+//
+// Every request is checked against upstream: when the cache holds a current
+// entry for the object, its ETag goes out as If-None-Match so that a 304
+// refreshes the cached entry's metadata while the cached body is served. A
+// 200 carries the new version and replaces it. Responses to requests that
+// carried a Range header are never cached.
+func (s *Server) lookup(ctx context.Context, tenant, objectPath string, hasRange bool, in http.Header) (*objcache.Object, bool) {
+	var cachedKey string
+	var cached *objcache.Object
 	if s.cache != nil {
-		if obj, ok := s.cache.Get(s.cache.Key(tenant, objectPath, "")); ok {
-			return obj, true, true
+		if key, obj, ok := s.cache.Current(tenant, objectPath); ok {
+			cachedKey, cached = key, obj
 		}
 	}
 
-	resp, err := s.upstream.Get(ctx, tenant, objectPath, forwardHeaders(in))
+	hdr := forwardHeaders(in)
+	if cached != nil && cached.ETag != "" {
+		hdr.Set("If-None-Match", cached.ETag)
+	}
+
+	resp, err := s.upstream.Get(ctx, tenant, objectPath, hdr)
 	if err != nil {
-		return nil, false, false
+		return nil, false
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotModified {
+		// A 304 is only meaningful as an answer to the revalidation above;
+		// it refreshes the cached entry's metadata and is never cached
+		// itself.
+		if cached == nil {
+			return nil, false
+		}
+		refreshObject(cached, resp.Header)
+		s.cache.Put(cachedKey, cached)
+		return cached, true
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, false, false
+		return nil, false
 	}
-	if resp.StatusCode >= http.StatusBadRequest && resp.StatusCode != http.StatusNotModified {
-		return nil, false, false
+	if resp.StatusCode != http.StatusOK {
+		return nil, false
 	}
 
 	obj := objectFromResponse(tenant, objectPath, resp, body)
-	if s.cache != nil {
+	if s.cache != nil && !hasRange {
 		s.cache.Put(s.cache.Key(tenant, objectPath, obj.ETag), obj)
 	}
-	return obj, false, true
+	return obj, true
+}
+
+// refreshObject folds the metadata of an upstream 304 into a cached entry.
+// The body is untouched: a 304 carries no content.
+func refreshObject(obj *objcache.Object, header http.Header) {
+	if value := header.Get("ETag"); value != "" {
+		obj.ETag = value
+	}
+	if value := parseHTTPDate(header.Get("Last-Modified")); !value.IsZero() {
+		obj.LastModified = value
+	}
+	if value := header.Get("Content-Type"); value != "" {
+		obj.ContentType = value
+	}
+	if value := header.Get("Cache-Control"); value != "" {
+		obj.CacheControl = value
+	}
+	if value := header.Get("X-Rangecarve-Filename"); value != "" {
+		obj.Filename = value
+	}
 }
 
 func objectFromResponse(tenant, objectPath string, resp *http.Response, body []byte) *objcache.Object {
@@ -221,12 +288,17 @@ func objectFromResponse(tenant, objectPath string, resp *http.Response, body []b
 }
 
 // forwardHeaders copies the request headers the upstream store may look at.
+// Hop-by-hop headers stay behind, and so do Range and the conditional
+// headers: those are evaluated at the edge, and forwarding them would let
+// upstream answer 206, 304 or 412 in ways the edge cannot relay.
 func forwardHeaders(in http.Header) http.Header {
 	out := make(http.Header, len(in))
 	for key, values := range in {
 		switch http.CanonicalHeaderKey(key) {
 		case "Host", "Connection", "Keep-Alive", "Proxy-Connection",
-			"Transfer-Encoding", "Upgrade", "Te", "Trailer":
+			"Transfer-Encoding", "Upgrade", "Te", "Trailer",
+			"Range", "If-Match", "If-None-Match", "If-Modified-Since",
+			"If-Unmodified-Since", "If-Range":
 			continue
 		}
 		out[http.CanonicalHeaderKey(key)] = append([]string(nil), values...)

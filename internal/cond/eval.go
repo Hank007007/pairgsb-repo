@@ -65,38 +65,47 @@ type Input struct {
 // be.
 func Evaluate(in Input) Decision {
 	h := in.Header
+	hasETagCondition := strings.TrimSpace(h.Get("If-Match")) != "" ||
+		strings.TrimSpace(h.Get("If-None-Match")) != ""
 
 	if value := strings.TrimSpace(h.Get("If-Match")); value != "" {
 		if !tagListMatches(value, in.ETag, true) {
-			return Decision{Kind: KindNotModified, Reason: "if-match"}
+			return Decision{Kind: KindPreconditionFailed, Reason: "if-match"}
 		}
 	}
 
 	if value := strings.TrimSpace(h.Get("If-None-Match")); value != "" {
 		if tagListMatches(value, in.ETag, false) {
+			if in.Method == http.MethodGet || in.Method == http.MethodHead {
+				return Decision{Kind: KindNotModified, Reason: "if-none-match"}
+			}
 			return Decision{Kind: KindPreconditionFailed, Reason: "if-none-match"}
 		}
 	}
 
+	if !hasETagCondition {
+		if value := strings.TrimSpace(h.Get("If-Modified-Since")); value != "" {
+			if in.Method == http.MethodGet || in.Method == http.MethodHead {
+				if t, err := http.ParseTime(value); err == nil {
+					if !in.LastModified.After(t) {
+						return Decision{Kind: KindNotModified, Reason: "if-modified-since"}
+					}
+				}
+			}
+		}
+
+		if value := strings.TrimSpace(h.Get("If-Unmodified-Since")); value != "" {
+			if t, err := http.ParseTime(value); err == nil {
+				if in.LastModified.After(t) {
+					return Decision{Kind: KindPreconditionFailed, Reason: "if-unmodified-since"}
+				}
+			}
+		}
+	}
+
 	if value := strings.TrimSpace(h.Get("If-Range")); value != "" {
-		if !ifRangeMatches(value, in) {
+		if !ifRangeMatches(value, in.ETag) {
 			return Decision{Kind: KindIgnoreRange, Reason: "if-range"}
-		}
-	}
-
-	if value := strings.TrimSpace(h.Get("If-Modified-Since")); value != "" {
-		if t, err := http.ParseTime(value); err == nil {
-			if !in.LastModified.Truncate(time.Second).After(t) {
-				return Decision{Kind: KindNotModified, Reason: "if-modified-since"}
-			}
-		}
-	}
-
-	if value := strings.TrimSpace(h.Get("If-Unmodified-Since")); value != "" {
-		if t, err := http.ParseTime(value); err == nil {
-			if in.LastModified.Truncate(time.Second).After(t) {
-				return Decision{Kind: KindPreconditionFailed, Reason: "if-unmodified-since"}
-			}
 		}
 	}
 
@@ -104,9 +113,13 @@ func Evaluate(in Input) Decision {
 }
 
 // ifRangeMatches reports whether the validator the client offered still names
-// the version it is looking at.
-func ifRangeMatches(value string, in Input) bool {
-	return bareTag(value) == bareTag(in.ETag)
+// the version it is looking at. Only strong validators count: the value must
+// equal the object's current ETag byte for byte, quotes included.
+func ifRangeMatches(value, etag string) bool {
+	if etag == "" || strings.HasPrefix(value, "W/") {
+		return false
+	}
+	return value == etag
 }
 
 // bareTag drops the weak marker and the surrounding quotes from a validator.
@@ -128,6 +141,9 @@ func tagListMatches(list, etag string, strong bool) bool {
 			continue
 		}
 		if strong {
+			if strings.HasPrefix(item, "W/") || strings.HasPrefix(etag, "W/") {
+				continue
+			}
 			if item == etag {
 				return true
 			}

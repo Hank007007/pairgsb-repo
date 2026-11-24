@@ -7,9 +7,11 @@ package respond
 
 import (
 	"bytes"
+	"fmt"
 	"mime/multipart"
 	"net/textproto"
 	"strconv"
+	"strings"
 
 	"rangecarve/internal/rangehdr"
 )
@@ -85,6 +87,7 @@ func buildWhole(obj Object) *Response {
 func buildSingle(obj Object, span rangehdr.Span) *Response {
 	resp := newResponse(206)
 	resp.set("Content-Type", contentType(obj))
+	resp.set("Accept-Ranges", "bytes")
 	resp.set("Content-Range", contentRange(span, obj.Size))
 	resp.set("Content-Length", strconv.FormatInt(span.Len(), 10))
 	applyMetadata(resp, obj)
@@ -101,9 +104,6 @@ func buildMulti(obj Object, spans []rangehdr.Span) *Response {
 		head := make(textproto.MIMEHeader)
 		head.Set("Content-Range", contentRange(span, obj.Size))
 		head.Set("Content-Type", partType)
-		if obj.Filename != "" {
-			head.Set("Content-Disposition", dispositionValue(obj.Filename))
-		}
 		parts = append(parts, Part{Span: span, Header: head})
 	}
 
@@ -111,6 +111,7 @@ func buildMulti(obj Object, spans []rangehdr.Span) *Response {
 	resp.Boundary = writer.Boundary()
 	resp.Parts = parts
 	resp.set("Content-Type", "multipart/byteranges; boundary="+resp.Boundary)
+	resp.set("Accept-Ranges", "bytes")
 	applyMetadata(resp, obj)
 	return resp
 }
@@ -134,9 +135,78 @@ func applyDisposition(resp *Response, obj Object) {
 	resp.set("Content-Disposition", dispositionValue(obj.Filename))
 }
 
-// dispositionValue builds the attachment header for one upload name.
+// dispositionValue builds the Content-Disposition value for one upload name.
+// Names that stay printable ASCII ride in a quoted string; anything else gets
+// an ASCII fallback plus an RFC 5987 filename* parameter, so the original
+// name survives without ever putting a control character or a raw non-ASCII
+// byte into the header.
 func dispositionValue(filename string) string {
-	return `attachment; filename="` + filename + `"`
+	if isPrintableASCII(filename) {
+		return `attachment; filename="` + escapeQuoted(filename) + `"`
+	}
+	return `attachment; filename="` + escapeQuoted(asciiFallback(filename)) +
+		`"; filename*=UTF-8''` + encodeRFC5987(filename)
+}
+
+// isPrintableASCII reports whether s holds only printable ASCII bytes.
+func isPrintableASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+// escapeQuoted renders s for a quoted string: `"` and `\` are backslash
+// escaped and control characters are dropped, since they must never appear
+// in a header value.
+func escapeQuoted(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c < 0x20 || c == 0x7f:
+			continue
+		case c == '"' || c == '\\':
+			b.WriteByte('\\')
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+// asciiFallback maps s to printable ASCII, replacing every non-ASCII rune
+// with _ and dropping control characters.
+func asciiFallback(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r >= 0x20 && r <= 0x7e:
+			b.WriteRune(r)
+		case r > 0x7f:
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
+}
+
+// encodeRFC5987 percent-encodes s as an RFC 5987 ext-value, keeping only
+// attr-chars verbatim.
+func encodeRFC5987(s string) string {
+	const attrChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$&+-.^_`|~"
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if strings.IndexByte(attrChars, c) >= 0 {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
 }
 
 func contentType(obj Object) string {
@@ -148,5 +218,5 @@ func contentType(obj Object) string {
 
 func contentRange(span rangehdr.Span, size int64) string {
 	return "bytes " + strconv.FormatInt(span.Start, 10) + "-" +
-		strconv.FormatInt(span.End+1, 10) + "/" + strconv.FormatInt(size, 10)
+		strconv.FormatInt(span.End, 10) + "/" + strconv.FormatInt(size, 10)
 }

@@ -31,7 +31,13 @@ const (
 	OutcomeIgnored
 	// OutcomeUnsatisfiable means the header cannot be met.
 	OutcomeUnsatisfiable
+	// OutcomeInvalid means the header is malformed and must be rejected.
+	OutcomeInvalid
 )
+
+// maxRanges is the largest range set the edge accepts; longer sets are
+// ignored wholesale.
+const maxRanges = 4
 
 // Spec is the parsed form of a Range header.
 type Spec struct {
@@ -50,64 +56,70 @@ func Parse(header string, size int64) Spec {
 	}
 
 	unit, set, ok := strings.Cut(v, "=")
-	if !ok {
-		return Spec{Outcome: OutcomeIgnored}
-	}
-	if !strings.EqualFold(strings.TrimSpace(unit), "bytes") {
+	if !ok || !strings.EqualFold(strings.TrimSpace(unit), "bytes") {
 		return Spec{Outcome: OutcomeIgnored}
 	}
 
 	parts := strings.Split(set, ",")
+	if len(parts) > maxRanges {
+		return Spec{Outcome: OutcomeIgnored}
+	}
+
 	spans := make([]Span, 0, len(parts))
 	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		first, last, ok := strings.Cut(part, "-")
-		if !ok {
-			return Spec{Outcome: OutcomeNone}
+		span, outcome := parsePart(strings.TrimSpace(part), size)
+		if outcome != OutcomeRanges {
+			return Spec{Outcome: outcome}
 		}
-		first = strings.TrimSpace(first)
-		last = strings.TrimSpace(last)
-
-		if first == "" {
-			n, err := strconv.ParseInt(last, 10, 64)
-			if err != nil {
-				return Spec{Outcome: OutcomeNone}
-			}
-			if n <= 0 {
-				spans = append(spans, Span{Start: 0, End: size - 1})
-				continue
-			}
-			spans = append(spans, Span{Start: size - n + 1, End: size})
-			continue
-		}
-
-		start, err := strconv.ParseInt(first, 10, 64)
-		if err != nil {
-			return Spec{Outcome: OutcomeNone}
-		}
-
-		end := size - 1
-		if last != "" {
-			end, err = strconv.ParseInt(last, 10, 64)
-			if err != nil {
-				return Spec{Outcome: OutcomeNone}
-			}
-			if end > size-1 {
-				end = size - 1
-			}
-		}
-
-		if start > end {
-			continue
-		}
-		if start >= size {
-			continue
-		}
-		spans = append(spans, Span{Start: start, End: end})
-	}
-
-	if len(spans) == 0 {
-		return Spec{Outcome: OutcomeNone}
+		spans = append(spans, span)
 	}
 	return Spec{Outcome: OutcomeRanges, Spans: spans}
+}
+
+// parsePart parses one comma separated range part against an object of size
+// bytes and reports the closed interval it selects. A malformed part yields
+// OutcomeInvalid, an unsatisfiable one OutcomeUnsatisfiable.
+func parsePart(part string, size int64) (Span, Outcome) {
+	first, last, ok := strings.Cut(part, "-")
+	if !ok {
+		return Span{}, OutcomeInvalid
+	}
+	first = strings.TrimSpace(first)
+	last = strings.TrimSpace(last)
+
+	if first == "" {
+		n, err := strconv.ParseInt(last, 10, 64)
+		if err != nil {
+			return Span{}, OutcomeInvalid
+		}
+		if n <= 0 {
+			return Span{}, OutcomeUnsatisfiable
+		}
+		start := size - n
+		if start < 0 {
+			start = 0
+		}
+		return Span{Start: start, End: size - 1}, OutcomeRanges
+	}
+
+	start, err := strconv.ParseInt(first, 10, 64)
+	if err != nil {
+		return Span{}, OutcomeInvalid
+	}
+
+	end := size - 1
+	if last != "" {
+		end, err = strconv.ParseInt(last, 10, 64)
+		if err != nil {
+			return Span{}, OutcomeInvalid
+		}
+	}
+
+	if start > end || start >= size {
+		return Span{}, OutcomeUnsatisfiable
+	}
+	if end > size-1 {
+		end = size - 1
+	}
+	return Span{Start: start, End: end}, OutcomeRanges
 }

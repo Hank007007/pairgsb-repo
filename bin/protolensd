@@ -1,0 +1,198 @@
+#!/usr/bin/env node
+/**
+ * protolensd — the protolens gateway daemon.
+ *
+ * Start-up arguments and exit codes are part of the operational contract.
+ *
+ *   --listen <port>       TCP port to listen on (default 7070, 0 = ephemeral)
+ *   --schema <path>       path to a schema snapshot (JSON)
+ *   --secret <value>      HMAC key for request signatures
+ *   --help                print this help and exit 0
+ *
+ * Exit codes:
+ *   0  clean shutdown (SIGINT / SIGTERM, or --help)
+ *   2  invalid start-up arguments
+ *   3  schema file could not be loaded
+ */
+import { readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { ProtolensError } from '../lib/errors.js';
+import { SchemaRegistry } from '../lib/schema/registry.js';
+import { handleRequest } from '../lib/gateway/server.js';
+
+const EXIT_OK = 0;
+const EXIT_USAGE = 2;
+const EXIT_SCHEMA = 3;
+
+const USAGE = 'usage: protolensd [--listen <port>] [--schema <path>] [--secret <value>] [--help]';
+
+const HEADER_TYPE = 'x-protolens-type';
+const HEADER_VERSION = 'x-protolens-version';
+const HEADER_SIGNATURE = 'x-protolens-signature';
+
+function parseArgs(argv) {
+  const options = { listen: 7070, schema: null, secret: null };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    const takeValue = () => {
+      const value = argv[i + 1];
+      if (value === undefined) {
+        throw new ProtolensError('usage', `${arg} requires a value`);
+      }
+      i += 1;
+      return value;
+    };
+    switch (arg) {
+      case '--listen': {
+        const raw = takeValue();
+        const port = Number(raw);
+        if (!Number.isInteger(port) || port < 0 || port > 65535) {
+          throw new ProtolensError('usage', `invalid port: ${raw}`);
+        }
+        options.listen = port;
+        break;
+      }
+      case '--schema':
+        options.schema = takeValue();
+        break;
+      case '--secret':
+        options.secret = takeValue();
+        break;
+      case '--help':
+      case '-h':
+        options.help = true;
+        break;
+      default:
+        throw new ProtolensError('usage', `unknown argument: ${arg}`);
+    }
+  }
+  return options;
+}
+
+function loadSnapshot(path) {
+  if (path === null) {
+    return { types: {} };
+  }
+  return JSON.parse(readFileSync(path, 'utf8'));
+}
+
+function reply(response, result) {
+  const payload = JSON.stringify(result.body ?? result.error ?? {});
+  response.writeHead(result.status, {
+    'content-type': 'application/json',
+    'content-length': Buffer.byteLength(payload),
+  });
+  response.end(payload);
+}
+
+function collectBody(request, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    request.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        request.destroy();
+        reject(new ProtolensError('body_too_large', 'request body exceeds the transport ceiling'));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on('end', () => resolve(Buffer.concat(chunks)));
+    request.on('error', reject);
+  });
+}
+
+/** Bind a listener for an already-loaded registry. */
+export function createGatewayServer(registry, secret, logger = undefined) {
+  return createServer(async (req, res) => {
+    try {
+      const body = await collectBody(req, 8 * 1024 * 1024);
+      const headers = {};
+      for (const [name, value] of Object.entries(req.headers)) {
+        headers[name] = Array.isArray(value) ? value.join(',') : value;
+      }
+
+      const versionHeader = headers[HEADER_VERSION];
+      const result = handleRequest(
+        {
+          body,
+          type: headers[HEADER_TYPE],
+          version: versionHeader === undefined ? undefined : Number(versionHeader),
+          signature: headers[HEADER_SIGNATURE] ?? '',
+          headers,
+        },
+        { registry, secret, logger },
+      );
+      reply(res, result);
+    } catch (err) {
+      reply(res, { status: 400, error: { code: 'bad_request', message: 'request could not be read' } });
+    }
+  });
+}
+
+function main(argv) {
+  let options;
+  try {
+    options = parseArgs(argv);
+  } catch (err) {
+    process.stderr.write(`protolensd: ${err.message}\n${USAGE}\n`);
+    return EXIT_USAGE;
+  }
+
+  if (options.help) {
+    process.stdout.write(`${USAGE}\n`);
+    return EXIT_OK;
+  }
+
+  let snapshot;
+  try {
+    snapshot = loadSnapshot(options.schema);
+  } catch (err) {
+    process.stderr.write(`protolensd: cannot load schema: ${err.message}\n`);
+    return EXIT_SCHEMA;
+  }
+
+  const registry = new SchemaRegistry(snapshot);
+  const server = createGatewayServer(registry, options.secret ?? '');
+
+  server.listen(options.listen, () => {
+    const address = server.address();
+    process.stdout.write(
+      `protolensd: listening on ${address.port} types=${registry.typeNames().length}\n`,
+    );
+  });
+
+  const shutdown = () => {
+    server.close(() => {
+      process.exitCode = EXIT_OK;
+    });
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+
+  if (options.schema !== null) {
+    process.on('SIGHUP', () => {
+      try {
+        registry.reload(loadSnapshot(options.schema));
+        process.stdout.write('protolensd: schema reloaded\n');
+      } catch (err) {
+        process.stderr.write(`protolensd: reload failed: ${err.message}\n`);
+      }
+    });
+  }
+
+  return EXIT_OK;
+}
+
+const invokedDirectly =
+  process.argv[1] !== undefined && process.argv[1].replace(/\\/g, '/').endsWith('/bin/protolensd');
+
+if (invokedDirectly) {
+  process.exitCode = main(process.argv.slice(2));
+  if (process.exitCode !== EXIT_OK) {
+    process.exit(process.exitCode);
+  }
+}
+
+export { parseArgs, main, EXIT_OK, EXIT_USAGE, EXIT_SCHEMA };

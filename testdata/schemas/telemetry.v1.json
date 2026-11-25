@@ -1,0 +1,20 @@
+{
+  "types": {
+    "SensorReading": {
+      "fields": [
+        { "number": 1, "name": "sensor_id", "type": "string" },
+        { "number": 2, "name": "millivolts", "type": "fixed32" }
+      ]
+    },
+    "Telemetry": {
+      "fields": [
+        { "number": 1, "name": "device_id", "type": "string" },
+        { "number": 2, "name": "sequence", "type": "uint32" },
+        { "number": 3, "name": "payload", "type": "bytes" },
+        { "number": 4, "name": "reading", "type": "message", "messageType": "SensorReading" },
+        { "number": 5, "name": "tags", "type": "string", "repeated": true },
+        { "number": 6, "name": "counters", "type": "int32", "repeated": true }
+      ]
+    }
+  }
+}

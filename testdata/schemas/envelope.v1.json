@@ -1,0 +1,11 @@
+{
+  "types": {
+    "Envelope": {
+      "fields": [
+        { "number": 1, "name": "id", "type": "string" },
+        { "number": 2, "name": "hop", "type": "uint32" },
+        { "number": 3, "name": "values", "type": "uint32", "repeated": true, "packed": true }
+      ]
+    }
+  }
+}

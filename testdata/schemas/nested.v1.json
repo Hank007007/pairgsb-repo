@@ -1,0 +1,11 @@
+{
+  "types": {
+    "Node": {
+      "fields": [
+        { "number": 1, "name": "label", "type": "string" },
+        { "number": 2, "name": "child", "type": "message", "messageType": "Node" },
+        { "number": 3, "name": "children", "type": "message", "messageType": "Node", "repeated": true }
+      ]
+    }
+  }
+}

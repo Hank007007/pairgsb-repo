@@ -1,0 +1,19 @@
+version: 1
+rules:
+  - id: allow-defaults
+    subject: team-b
+    action: allow
+    destinations:
+      - partner-c.example
+    schedule: &office
+      from: "08:00"
+      until: "18:00"
+
+  - <<: {id: allow-night, subject: team-b, action: allow, destinations: [partner-d.example]}
+    schedule: *office
+
+  - id: deny-everything
+    subject: team-b
+    action: deny
+    destinations:
+      - blocked.example

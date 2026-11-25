@@ -1,0 +1,6 @@
+version: 1
+rules:
+  - id: allow-team-a
+    subject: team-a
+    action: allow
+    destinations: [partner-a.example

@@ -40,7 +40,7 @@ class SmsGatewayProvider(Provider):
         return self._request(
             "POST",
             f"/sms/keys/{key_id}/retire",
-            json={"keep_until": ""},
+            json={"keep_until": keep_until or ""},
             headers={"X-Api-Key": self.secret},
         )
 

@@ -23,6 +23,10 @@ class ProviderError(RuntimeError):
         self.body = body
 
 
+class VerificationError(ProviderError):
+    """A live pre-revocation probe did not confirm a credential."""
+
+
 class Provider:
     """Base class with the HTTP helpers every adapter needs."""
 

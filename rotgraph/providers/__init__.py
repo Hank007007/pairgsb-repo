@@ -6,6 +6,6 @@ exposes the same four operations, see ``docs/swap-window.md`` §2.
 
 from __future__ import annotations
 
-from .base import Provider, ProviderError, build_providers  # noqa: F401
+from .base import Provider, ProviderError, VerificationError, build_providers  # noqa: F401
 
-__all__ = ["Provider", "ProviderError", "build_providers"]
+__all__ = ["Provider", "ProviderError", "VerificationError", "build_providers"]

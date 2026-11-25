@@ -13,6 +13,51 @@ from typing import Any, Iterable
 class PlanError(ValueError):
     """Raised when a batch description cannot be executed as written."""
 
+    kind = "invalid_plan"
+
+    def __init__(self, message: str, **details: Any) -> None:
+        super().__init__(message)
+        self.details = dict(details)
+        self.reason = self.kind
+        for key, value in details.items():
+            setattr(self, key, value)
+
+
+ConfigError = PlanError
+ValidationError = PlanError
+
+
+class DuplicateKeyError(PlanError):
+    """Two entries in ``keys`` use the same name."""
+
+    kind = "duplicate_key"
+
+
+DuplicateNameError = DuplicateKeyError
+
+
+class UnknownDependencyError(PlanError):
+    """A dependency points at a name absent from this batch."""
+
+    kind = "unknown_dependency"
+
+
+# Compatibility alias for the wording used in the specification/report.
+DependencyNotFoundError = UnknownDependencyError
+MissingDependencyError = UnknownDependencyError
+UnknownDependency = UnknownDependencyError
+DependencyError = UnknownDependencyError
+
+
+class DependencyCycleError(PlanError):
+    """The dependency graph contains a cycle."""
+
+    kind = "cycle"
+
+
+CycleError = DependencyCycleError
+CycleDetectedError = DependencyCycleError
+
 
 @dataclass(frozen=True)
 class KeySpec:
@@ -124,7 +169,11 @@ def load_plan(path: str) -> Plan:
 
     seen: set[str] = set()
     for spec in keys:
-        _require(spec.name not in seen, f"duplicate key name {spec.name!r}")
+        if spec.name in seen:
+            raise DuplicateKeyError(
+                f"duplicate key name {spec.name!r}",
+                name=spec.name,
+            )
         seen.add(spec.name)
 
     consumers = raw.get("consumers") or []
@@ -166,7 +215,7 @@ def detect_cycle(plan: Plan) -> list[str] | None:
         for nxt in graph.get(node, ()):
             if colour.get(nxt, 0) == 1:
                 start = stack.index(nxt)
-                return stack[start:] + [nxt]
+                return stack[start:]
             if colour.get(nxt, 0) == 0:
                 found = visit(nxt)
                 if found is not None:
@@ -186,14 +235,24 @@ def detect_cycle(plan: Plan) -> list[str] | None:
 def _check_dependencies(plan: Plan) -> None:
     names = set(plan.names)
     problems = []
+    missing: list[dict[str, str]] = []
     for spec in plan.keys:
         for dep in spec.depends_on:
             if dep not in names:
                 problems.append(f"key {spec.name!r} depends on unknown key {dep!r}")
-            elif dep == spec.name:
-                problems.append(f"key {spec.name!r} depends on itself")
+                missing.append({"key": spec.name, "dependency": dep})
     if problems:
-        raise PlanError("; ".join(problems))
+        unknown = UnknownDependencyError("; ".join(problems), missing=missing)
+        unknown.dependencies = missing
+        raise unknown
+
+
+def _check_duplicate_names(plan: Plan) -> None:
+    seen: set[str] = set()
+    for spec in plan.keys:
+        if spec.name in seen:
+            raise DuplicateKeyError(f"duplicate key name {spec.name!r}", name=spec.name)
+        seen.add(spec.name)
 
 
 def order(plan: Plan) -> list[str]:
@@ -202,10 +261,14 @@ def order(plan: Plan) -> list[str]:
     The rule is the one written down in ``docs/rotation-plan.md`` §2.4: at
     every step take the earliest still-eligible key in declaration order.
     """
+    _check_duplicate_names(plan)
     _check_dependencies(plan)
     cycle = detect_cycle(plan)
     if cycle is not None:
-        raise PlanError("dependency cycle: " + " -> ".join(cycle))
+        raise DependencyCycleError(
+            "dependency cycle: " + " -> ".join(cycle + [cycle[0]]),
+            cycle=cycle,
+        )
 
     remaining: list[str] = list(plan.names)
     placed: list[str] = []
@@ -229,3 +292,9 @@ def order(plan: Plan) -> list[str]:
 def iter_ordered(plan: Plan) -> Iterable[KeySpec]:
     for name in order(plan):
         yield plan.by_name(name)
+
+
+def validate(plan: Plan) -> list[str]:
+    """Validate a whole plan and return its execution order."""
+
+    return order(plan)

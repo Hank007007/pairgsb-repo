@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .. import __version__
+from ..plan import PlanError, load_plan
 from ..runner import execute
 
 
@@ -26,12 +27,13 @@ class AdminState:
         self.lock = threading.Lock()
 
 
-def _journal_for(state: AdminState, batch_path: str, batch: str) -> str | None:
+def _journal_for(state: AdminState, batch_or_path: str, batch: str | None = None) -> str | None:
     if not state.journal_dir:
         return None
     import os
 
-    return os.path.join(state.journal_dir, f"{batch}.journal")
+    name = batch or batch_or_path
+    return os.path.join(state.journal_dir, f"{name}.journal")
 
 
 def make_handler(state: AdminState):
@@ -70,8 +72,34 @@ def make_handler(state: AdminState):
                 self._send(400, {"ok": False, "error": "plan is required"})
                 return
             with state.lock:
-                result = execute(plan_path)
-            self._send(200 if result.ok else 500, result.to_dict())
+                try:
+                    plan = load_plan(plan_path)
+                    journal_path = _journal_for(state, plan_path, plan.batch)
+                    result = execute(plan, journal_path=journal_path)
+                except PlanError as exc:
+                    code = getattr(exc, "kind", "invalid_plan")
+                    self._send(
+                        400,
+                        {
+                            "ok": False,
+                            "error": str(exc),
+                            "error_code": code,
+                            "error_kind": code,
+                        },
+                    )
+                    return
+            if result.ok:
+                status = 200
+            elif result.error_code in {
+                "invalid_plan",
+                "duplicate_key",
+                "cycle",
+                "unknown_dependency",
+            }:
+                status = 400
+            else:
+                status = 500
+            self._send(status, result.to_dict())
 
     return AdminHandler
 

@@ -1,0 +1,6 @@
+# allow-list for snisieved
+# one rule per line: exact name, or "*." plus one label of wildcard
+
+example.com
+*.example.net
+www.internal.test

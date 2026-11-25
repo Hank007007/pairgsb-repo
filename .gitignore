@@ -1,0 +1,25 @@
+# Build output
+/bin/
+/dist/
+/snisieved
+/snisieved.exe
+*.exe
+*.test
+*.out
+*.prof
+
+# Go tooling caches
+/.cache/
+/.gocache/
+/vendor/
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Local scratch
+/*.prompt.txt
